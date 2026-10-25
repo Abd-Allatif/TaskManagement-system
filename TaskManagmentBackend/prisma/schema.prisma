@@ -1,0 +1,123 @@
+datasource db {
+    provider = "mysql"
+}
+
+generator client {
+    provider = "prisma-client-js"
+}
+
+model User {
+    id                 String              @id @default(uuid(7))
+    name               String
+    email              String              @unique
+    emailVerifiedAt    DateTime?           @map("email_verified_at")
+    isVerified         Boolean             @default(false) @map("is_verified")
+    password           String
+    createdAt          DateTime            @default(now()) @map("created_at")
+    verificationTokens VerificationToken[]
+
+    @@map("users")
+}
+
+model Admin {
+    id                      String                   @id @default(uuid(7))
+    name                    String
+    email                   String                   @unique
+    emailVerifiedAt         DateTime?                @map("email_verified_at")
+    isVerified              Boolean                  @default(false) @map("is_verified")
+    password                String
+    createdAt               DateTime                 @default(now()) @map("created_at")
+    adminVerificationTokens AdminVerificationToken[]
+
+    @@map("admins")
+}
+
+model VerificationToken {
+    id        String   @id @default(uuid(7))
+    token     String   @unique
+    expiresAt DateTime @map("expires_at")
+    userId    String   @map("user_id")
+    user      User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+    createdAt DateTime @default(now())
+
+    @@map("verification_tokens")
+}
+
+model AdminVerificationToken {
+    id        String   @id @default(uuid(7))
+    token     String   @unique
+    expiresAt DateTime @map("expires_at")
+    adminId   String   @map("admin_id")
+    admin     Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+    createdAt DateTime @default(now())
+
+    @@map("admin_verification_tokens")
+}
+
+model Status {
+    id    String @id @default(uuid(7))
+    code  String @unique
+    label String
+    tasks Task[]
+
+    @@map("statuses")
+}
+
+model Task {
+    id            String              @id @default(uuid(7))
+    title         String
+    description   String?             @db.Text
+    createDate    DateTime            @default(now()) @map("create_date")
+    deadline      DateTime?
+    statusId      String              @map("status_id")
+    status        Status              @relation(fields: [statusId], references: [id])
+    createdByType String              @map("created_by_type")
+    createdById   String              @map("created_by_id")
+    endFlag       Boolean             @default(false) @map("end_flag")
+    parentTaskId  String?             @map("parent_task_id")
+    parentTask    Task?               @relation("SubTasks", fields: [parentTaskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+    subTasks      Task[]              @relation("SubTasks")
+    deletedAt     DateTime?           @map("deleted_at")
+    createdAt     DateTime            @default(now()) @map("created_at")
+    assignments   TaskAssignment[]
+    categories    CategoryTaskPivot[]
+
+    @@index([statusId])
+    @@index([parentTaskId])
+    @@map("tasks")
+}
+
+model TaskAssignment {
+    id             String   @id @default(uuid(7))
+    taskId         String   @map("task_id")
+    task           Task     @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+    assignableType String   @map("assignable_type")
+    assignableId   String   @map("assignable_id")
+    createdAt      DateTime @default(now()) @map("created_at")
+
+    @@index([taskId])
+    @@map("task_assignments")
+}
+
+model Category {
+    id        String              @id @default(uuid(7))
+    name      String
+    color     String?
+    createdAt DateTime            @default(now()) @map("created_at")
+    tasks     CategoryTaskPivot[]
+
+    @@map("categories")
+}
+
+model CategoryTaskPivot {
+    id         String   @id @default(uuid(7))
+    taskId     String   @map("task_id")
+    task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+    categoryId String   @map("category_id")
+    category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+    createdAt  DateTime @default(now()) @map("created_at")
+
+    @@index([taskId])
+    @@index([categoryId])
+    @@map("category_task_pivot")
+}

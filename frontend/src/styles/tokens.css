@@ -1,0 +1,65 @@
+/* ==========================================================================
+   Design tokens — "Blueprint Console"
+   Warm bone paper, ink rules, one vermilion accent, cobalt structure.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* -- palette ----------------------------------------------------------- */
+  --paper: #ede8df;
+  --paper-raise: #f7f4ee;
+  --paper-sunk: #e2dbd0;
+  --ink: #15171c;
+  --ink-2: #3b414c;
+  --ink-3: #6c7480;
+  --ink-4: #99a0aa;
+  --line: #c8bfb1;
+  --line-strong: #15171c;
+
+  --accent: #e8410e;
+  --accent-press: #c9350a;
+  --accent-soft: #fbe2d9;
+
+  --cobalt: #1f3fd8;
+  --cobalt-soft: #e0e5fb;
+
+  --ok: #0e7c5a;
+  --ok-soft: #d9efe6;
+  --warn: #a86400;
+  --warn-soft: #f7e8cd;
+  --danger: #c2240a;
+  --danger-soft: #f8ded8;
+
+  /* -- type -------------------------------------------------------------- */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo,
+    Consolas, "Liberation Mono", monospace;
+
+  --track-label: 0.14em;
+
+  /* -- spacing rhythm ---------------------------------------------------- */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+  --s8: 64px;
+
+  /* -- surfaces ---------------------------------------------------------- */
+  --r-sm: 2px;
+  --r-md: 4px;
+  --r-lg: 10px;
+  --shadow-hard: 3px 3px 0 var(--ink);
+  --shadow-hard-sm: 2px 2px 0 var(--ink);
+  --shadow-float: 0 22px 44px -26px rgba(21, 23, 28, 0.55);
+  --ring: 0 0 0 3px rgba(31, 63, 216, 0.32);
+
+  /* -- structure --------------------------------------------------------- */
+  --rail-w: 268px;
+  --content-max: 1220px;
+  --ease: cubic-bezier(0.2, 0.7, 0.25, 1);
+}

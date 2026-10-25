@@ -1,0 +1,25 @@
+{
+  "name": "task-management-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Frontend for the Task Management System (Vite + React)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "postinstall": "node scripts/install-rollup-native.mjs"
+  },
+  "dependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "vite": "7.3.6"
+  },
+  "overrides": {
+    "rollup": "4.61.0",
+    "esbuild": "0.27.7",
+    "@rollup/rollup-linux-x64-gnu": "4.61.0"
+  }
+}
