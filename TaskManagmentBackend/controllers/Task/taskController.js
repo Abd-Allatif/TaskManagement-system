@@ -33,10 +33,11 @@ const createTask = async (req, res) => {
     });
   }
 
-  // Validate assignment IDs exist
+  // Validate assignment IDs exist (TYPE:id pairs, so a USER id pointing at an
+  // admin record is rejected)
   const validAssignables = await taskRepository.findExistingAssignables(assignments);
   const invalidAssignments = (assignments || []).filter(
-    (a) => !validAssignables.includes(a.assignableId)
+    (a) => !validAssignables.includes(`${a.assignableType}:${a.assignableId}`)
   );
   if (invalidAssignments.length > 0) {
     return res.status(400).json({
@@ -44,6 +45,17 @@ const createTask = async (req, res) => {
         .map((a) => a.assignableId)
         .join(", ")}`,
     });
+  }
+
+  // Subtask: the parent must exist, be alive and be a root task
+  if (parentTaskId) {
+    const parent = await taskRepository.findExistingParentTask(parentTaskId);
+    if (!parent) {
+      return res.status(400).json({
+        message:
+          "Invalid parentTaskId: parent not found, is deleted, or is itself a subtask",
+      });
+    }
   }
 
   const task = await taskRepository.createTask({
@@ -79,6 +91,7 @@ const getTasks = async (req, res) => {
     createdByType,
     endFlag,
     search,
+    parentTaskId,
     page,
     limit,
     sortBy,
@@ -89,6 +102,7 @@ const getTasks = async (req, res) => {
     ...(statusId && { statusId }),
     ...(createdById && { createdById, createdByType }),
     ...(endFlag !== undefined && { endFlag: endFlag === "true" }),
+    ...(parentTaskId && { parentTaskId }),
     ...(search && { search }),
     ...(page && { page }),
     ...(limit && { limit }),
@@ -139,13 +153,28 @@ const updateTask = async (req, res) => {
   if (assignments !== undefined) {
     const validAssignables = await taskRepository.findExistingAssignables(assignments);
     const invalidAssignments = assignments.filter(
-      (a) => !validAssignables.includes(a.assignableId)
+      (a) => !validAssignables.includes(`${a.assignableType}:${a.assignableId}`)
     );
     if (invalidAssignments.length > 0) {
       return res.status(400).json({
         message: `Invalid assignable IDs: ${invalidAssignments
           .map((a) => a.assignableId)
           .join(", ")}`,
+      });
+    }
+  }
+
+  // Subtask: parent must exist, be alive, be a root task, and not be the task itself
+  if (parentTaskId !== undefined && parentTaskId !== null) {
+    if (parentTaskId === req.params.id) {
+      return res.status(400).json({ message: "A task cannot be its own parent" });
+    }
+
+    const parent = await taskRepository.findExistingParentTask(parentTaskId);
+    if (!parent) {
+      return res.status(400).json({
+        message:
+          "Invalid parentTaskId: parent not found, is deleted, or is itself a subtask",
       });
     }
   }

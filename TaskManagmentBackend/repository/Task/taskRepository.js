@@ -42,6 +42,9 @@ const buildTaskWhere = (filters = {}) => ({
     createdByType: filters.createdByType,
   }),
   ...(filters.endFlag !== undefined && { endFlag: filters.endFlag }),
+  ...(filters.parentTaskId !== undefined && {
+    parentTaskId: filters.parentTaskId,
+  }),
   ...(filters.search && {
     OR: [
       { title: { contains: filters.search } },
@@ -132,18 +135,47 @@ const findExistingCategoryIds = async (ids) => {
 };
 
 const findExistingAssignables = async (assignments) => {
-  if(!assignments?.length) return [];
+  if (!assignments?.length) return [];
 
-  const users = await prisma.user.findMany({
-    where: {id: {in: assignments.map((a) => a.assignableId)}},
-    select: {id: true}
-  });
-  const admins = await prisma.admin.findMany({
-    where: {id: {in: assignments.map((a) => a.assignableId)}},
-    select: {id: true}
-  });
+  // Group the requested IDs by type, so each table is only queried with the
+  // IDs that are supposed to live in it (`assignableType` picks the table).
+  const idsByType = { USER: new Set(), ADMIN: new Set() };
+  for (const { assignableType, assignableId } of assignments) {
+    if (idsByType[assignableType]) idsByType[assignableType].add(assignableId);
+  }
 
-  return [...users, ...admins].map((a) => a.id);
+  const [users, admins] = await Promise.all([
+    idsByType.USER.size
+      ? prisma.user.findMany({
+          where: { id: { in: [...idsByType.USER] } },
+          select: { id: true },
+        })
+      : [],
+    idsByType.ADMIN.size
+      ? prisma.admin.findMany({
+          where: { id: { in: [...idsByType.ADMIN] } },
+          select: { id: true },
+        })
+      : [],
+  ]);
+
+  // A user ID found in the Admin table (or vice versa) must NOT count as
+  // valid, so validity is tracked as a TYPE:id pair, not a bare ID.
+  return [
+    ...users.map((u) => `USER:${u.id}`),
+    ...admins.map((a) => `ADMIN:${a.id}`),
+  ];
+};
+
+// A valid parent must exist, not be soft-deleted, and be a root task itself
+// (subtasks cannot have children — nesting stays one level deep).
+const findExistingParentTask = async (id) => {
+  if (!id) return null;
+
+  return prisma.task.findFirst({
+    where: { id, deletedAt: null, parentTaskId: null },
+    select: { id: true },
+  });
 };
 
 // Update
@@ -211,6 +243,7 @@ module.exports = {
   getStatusByCode,
   findExistingCategoryIds,
   findExistingAssignables,
+  findExistingParentTask,
   updateTask,
   deleteTask,
   taskInclude,

@@ -136,6 +136,22 @@ describe("getTasks", () => {
     expect(prisma.task.findMany.mock.calls[0][0].where.endFlag).toBe(true);
   });
 
+  it("filters subtasks by parentTaskId", async () => {
+    prisma.task.findMany.mockResolvedValue([]);
+
+    await taskRepository.getTasks({ parentTaskId: "p1" });
+
+    expect(prisma.task.findMany.mock.calls[0][0].where.parentTaskId).toBe("p1");
+  });
+
+  it("can list only root tasks with parentTaskId: null", async () => {
+    prisma.task.findMany.mockResolvedValue([]);
+
+    await taskRepository.getTasks({ parentTaskId: null });
+
+    expect(prisma.task.findMany.mock.calls[0][0].where.parentTaskId).toBeNull();
+  });
+
   it("searches title and description and returns pagination metadata", async () => {
     prisma.task.findMany.mockResolvedValue([{ id: "t1" }]);
     prisma.task.count.mockResolvedValue(1);
@@ -232,17 +248,66 @@ describe("findExistingAssignables", () => {
     expect(prisma.admin.findMany).not.toHaveBeenCalled();
   });
 
-  it("checks both users and admins", async () => {
+  it("checks each ID only in the table matching its assignableType", async () => {
     prisma.user.findMany.mockResolvedValue([{ id: "u1" }]);
     prisma.admin.findMany.mockResolvedValue([{ id: "a1" }]);
 
     const result = await taskRepository.findExistingAssignables([
       { assignableType: "USER", assignableId: "u1" },
+      { assignableType: "ADMIN", assignableId: "a1" },
     ]);
 
-    expect(prisma.user.findMany).toHaveBeenCalled();
-    expect(prisma.admin.findMany).toHaveBeenCalled();
-    expect(result).toEqual(["u1", "a1"]);
+    expect(prisma.user.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["u1"] } },
+      select: { id: true },
+    });
+    expect(prisma.admin.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["a1"] } },
+      select: { id: true },
+    });
+    expect(result).toEqual(["USER:u1", "ADMIN:a1"]);
+  });
+
+  it("does not query a table when no ID is declared for that type", async () => {
+    prisma.user.findMany.mockResolvedValue([{ id: "u1" }]);
+
+    const result = await taskRepository.findExistingAssignables([
+      { assignableType: "USER", assignableId: "u1" },
+    ]);
+
+    expect(prisma.admin.findMany).not.toHaveBeenCalled();
+    expect(result).toEqual(["USER:u1"]);
+  });
+
+  it("omits unknown assignableTypes from validity", async () => {
+    const result = await taskRepository.findExistingAssignables([
+      { assignableType: "GHOST", assignableId: "g1" },
+    ]);
+
+    expect(result).toEqual([]);
+    expect(prisma.user.findMany).not.toHaveBeenCalled();
+    expect(prisma.admin.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("findExistingParentTask", () => {
+  it("returns null without querying when no id is given", async () => {
+    const result = await taskRepository.findExistingParentTask("");
+
+    expect(result).toBeNull();
+    expect(prisma.task.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("only accepts an existing, non-deleted root task as parent", async () => {
+    prisma.task.findFirst.mockResolvedValue({ id: "p1" });
+
+    const result = await taskRepository.findExistingParentTask("p1");
+
+    expect(prisma.task.findFirst).toHaveBeenCalledWith({
+      where: { id: "p1", deletedAt: null, parentTaskId: null },
+      select: { id: true },
+    });
+    expect(result).toEqual({ id: "p1" });
   });
 });
 

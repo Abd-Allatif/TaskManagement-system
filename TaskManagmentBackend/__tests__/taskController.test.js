@@ -228,6 +228,65 @@ describe("createTask", () => {
     expect(createData.parentTaskId).toBe("parent-1");
   });
 
+  it("creates a subtask when the parent exists, is alive and is a root task", async () => {
+    prisma.task.create.mockResolvedValue({ id: "task-1" });
+    prisma.status.findUnique.mockResolvedValue({ id: "status-1", code: "PENDING" });
+    prisma.task.findFirst.mockResolvedValue({ id: "parent-1" });
+
+    const req = mockReq({ body: { ...validBody, parentTaskId: "parent-1" } });
+    const res = mockRes();
+
+    await createTask(req, res);
+
+    expect(prisma.task.findFirst).toHaveBeenCalledWith({
+      where: { id: "parent-1", deletedAt: null, parentTaskId: null },
+      select: { id: true },
+    });
+    expect(res.status).toHaveBeenCalledWith(201);
+    const createData = prisma.task.create.mock.calls[0][0].data;
+    expect(createData.parentTaskId).toBe("parent-1");
+  });
+
+  it("returns 400 when the subtask parent is missing, deleted or itself a subtask", async () => {
+    prisma.status.findUnique.mockResolvedValue({ id: "status-1", code: "PENDING" });
+    prisma.task.findFirst.mockResolvedValue(null);
+
+    const req = mockReq({ body: { ...validBody, parentTaskId: "ghost" } });
+    const res = mockRes();
+
+    await createTask(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      message:
+        "Invalid parentTaskId: parent not found, is deleted, or is itself a subtask",
+    });
+    expect(prisma.task.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects type/id mismatches in assignments (USER type pointing at an admin record)", async () => {
+    prisma.status.findUnique.mockResolvedValue({ id: "status-1", code: "PENDING" });
+    // The ID only exists as an ADMIN; the USER table has nothing
+    prisma.user.findMany.mockResolvedValue([]);
+    prisma.admin.findMany.mockResolvedValue([]);
+
+    const req = mockReq({
+      body: {
+        ...validBody,
+        assignments: [{ assignableType: "USER", assignableId: "admin-123" }],
+      },
+    });
+    const res = mockRes();
+
+    await createTask(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      message: "Invalid assignable IDs: admin-123",
+    });
+    expect(prisma.task.create).not.toHaveBeenCalled();
+  });
+
   it("defaults categories and assignments to empty arrays", async () => {
     prisma.task.create.mockResolvedValue({ id: "task-1" });
     prisma.status.findUnique.mockResolvedValue({ id: "status-1", code: "PENDING" });
@@ -366,6 +425,17 @@ describe("getTasks", () => {
     expect(where.createdById).toBe("user-1");
     expect(where.createdByType).toBe("USER");
   });
+
+  it("forwards parentTaskId to list a task's subtasks", async () => {
+    prisma.task.findMany.mockResolvedValue([]);
+
+    const req = mockReq({ query: { parentTaskId: "p1" } });
+    const res = mockRes();
+
+    await getTasks(req, res);
+
+    expect(prisma.task.findMany.mock.calls[0][0].where.parentTaskId).toBe("p1");
+  });
 });
 
 describe("updateTask", () => {
@@ -449,6 +519,62 @@ describe("updateTask", () => {
     expect(prisma.task.update).not.toHaveBeenCalled();
   });
 
+  it("returns 400 when a task is made its own parent", async () => {
+    const req = mockReq({
+      params: { id: "task-1" },
+      body: { parentTaskId: "task-1" },
+    });
+    const res = mockRes();
+
+    await updateTask(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      message: "A task cannot be its own parent",
+    });
+    expect(prisma.task.update).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when the new subtree parent is missing, deleted or itself a subtask", async () => {
+    prisma.task.findFirst.mockResolvedValue(null);
+
+    const req = mockReq({
+      params: { id: "task-1" },
+      body: { parentTaskId: "ghost" },
+    });
+    const res = mockRes();
+
+    await updateTask(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      message:
+        "Invalid parentTaskId: parent not found, is deleted, or is itself a subtask",
+    });
+    expect(prisma.task.update).not.toHaveBeenCalled();
+  });
+
+  it("re-parents onto a valid root task", async () => {
+    prisma.task.update.mockResolvedValue({ id: "task-1", parentTaskId: "parent-1" });
+    prisma.task.findFirst.mockResolvedValue({ id: "parent-1" });
+
+    const req = mockReq({
+      params: { id: "task-1" },
+      body: { parentTaskId: "parent-1" },
+    });
+    const res = mockRes();
+
+    await updateTask(req, res);
+
+    expect(prisma.task.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "task-1" },
+        data: expect.objectContaining({ parentTaskId: "parent-1" }),
+      })
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
   it("forwards categories and assignments for relation replacement", async () => {
     const updated = { id: "task-1" };
     prisma.task.update.mockResolvedValue(updated);
@@ -475,6 +601,27 @@ describe("updateTask", () => {
       message: "Task updated successfully",
       task: updated,
     });
+  });
+
+  it("rejects a USER assignment whose ID exists only in the ADMIN table", async () => {
+    prisma.user.findMany.mockResolvedValue([]);
+    prisma.admin.findMany.mockResolvedValue([{ id: "admin-1" }]);
+
+    const req = mockReq({
+      params: { id: "task-1" },
+      body: {
+        assignments: [{ assignableType: "USER", assignableId: "admin-1" }],
+      },
+    });
+    const res = mockRes();
+
+    await updateTask(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      message: "Invalid assignable IDs: admin-1",
+    });
+    expect(prisma.task.update).not.toHaveBeenCalled();
   });
 });
 
