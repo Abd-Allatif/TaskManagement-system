@@ -36,6 +36,7 @@ export function TaskDetailPage({ id }) {
   const principals = usePrincipals(true);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [subDrawerOpen, setSubDrawerOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const taskQuery = useResource((signal) => api.getTask(id, token), [token, id], {
@@ -107,8 +108,7 @@ export function TaskDetailPage({ id }) {
 
   if (!task) return null;
 
-  const deadline = task.deadline;
-  const dlState = deadlineState(deadline);
+  const deadline = task.deadline;  const dlState = deadlineState(deadline);
   const assignmentCount = (task.assignments || []).length;
   const subTasks = task.subTasks || [];
   const taskCategories = (task.categories || []).map((p) => p.category).filter(Boolean);
@@ -256,7 +256,18 @@ export function TaskDetailPage({ id }) {
             </dl>
           </Panel>
 
-          <Panel title={`Sub-tasks (${subTasks.length})`}>
+          <Panel
+            title={`Sub-tasks (${subTasks.length})`}
+            action={
+              /* The API only allows sub-tasks under root tasks, so the
+                 button is hidden while viewing a sub-task itself. */
+              canEdit && !task.endFlag && !hasParent ? (
+                <Button size="sm" variant="ghost" onClick={() => setSubDrawerOpen(true)}>
+                  + New sub-task
+                </Button>
+              ) : null
+            }
+          >
             {subTasks.length === 0 ? (
               <p className="muted">This task has no sub-tasks yet.</p>
             ) : (
@@ -357,6 +368,17 @@ export function TaskDetailPage({ id }) {
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         task={task}
+        statuses={statuses}
+        categories={categories}
+        principals={principals}
+        onSaved={() => taskQuery.reload()}
+      />
+
+      <TaskForm
+        open={subDrawerOpen}
+        onClose={() => setSubDrawerOpen(false)}
+        task={null}
+        presetParentId={task.id}
         statuses={statuses}
         categories={categories}
         principals={principals}

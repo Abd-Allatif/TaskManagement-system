@@ -51,6 +51,11 @@ export function TaskForm({
   categories = [],
   principals = [],
   onSaved,
+  /**
+   * When creating a sub-task from a parent's detail page, pass the parent id.
+   * The parent is pre-filled and locked for the whole session.
+   */
+  presetParentId = "",
 }) {
   const { token, isAdmin, principal } = useAuth();
   const toast = useToast();
@@ -94,6 +99,7 @@ export function TaskForm({
     } else {
       setForm({
         ...emptyForm,
+        parentTaskId: presetParentId,
         statusId: statusesRef.current[0]?.id || "",
         assignSelf: !isAdmin,
       });
@@ -101,7 +107,7 @@ export function TaskForm({
 
     setErrors({});
     setFormError(null);
-  }, [open, task, isAdmin]);
+  }, [open, task, isAdmin, presetParentId]);
 
   const parentOptions = useMemo(() => {
     const all = parentData?.tasks || [];
@@ -194,7 +200,7 @@ export function TaskForm({
   return (
     <Drawer
       open={open}
-      subtitle={isEdit ? "Edit task" : "New task"}
+      subtitle={isEdit ? "Edit task" : presetParentId ? "New sub-task" : "New task"}
       title={isEdit ? task?.title || "Task" : "Create a task"}
       onClose={onClose}
       footer={
@@ -203,7 +209,7 @@ export function TaskForm({
             Cancel
           </Button>
           <Button variant="primary" onClick={submit} loading={save.loading}>
-            {isEdit ? "Save changes" : "Create task"}
+            {isEdit ? "Save changes" : presetParentId ? "Create sub-task" : "Create task"}
           </Button>
         </>
       }
@@ -247,7 +253,7 @@ export function TaskForm({
             error={errors.statusId}
             onChange={(e) => set("statusId")(e.target.value)}
           >
-            <option value="">Use backend default (PENDING)</option>
+            <option value="">Default (PENDING)</option>
             {statuses.map((status) => (
               <option key={status.id} value={status.id}>
                 {status.label} ({status.code})
@@ -267,9 +273,14 @@ export function TaskForm({
 
         <Select
           label="Parent task"
-          hint="optional · creates a sub-task"
+          hint={
+            presetParentId
+              ? "locked · this task is the parent"
+              : "optional · creates a sub-task"
+          }
           value={form.parentTaskId}
           error={errors.parentTaskId}
+          disabled={Boolean(presetParentId)}
           onChange={(e) => set("parentTaskId")(e.target.value)}
         >
           <option value="">None — top-level task</option>
@@ -295,7 +306,7 @@ export function TaskForm({
             }))}
             value={form.categoryIds}
             onChange={set("categoryIds")}
-            emptyLabel="No categories yet — an administrator can create them."
+            emptyLabel="No categories yet — add one on the Categories page."
           />
           {errors.categories ? (
             <p className="field__error">{errors.categories}</p>

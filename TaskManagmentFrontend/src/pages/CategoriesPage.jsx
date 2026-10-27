@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { AppShell } from "../components/AppShell.jsx";
 import {
-  Badge,
   Button,
   ConfirmDialog,
   LoadingRow,
@@ -17,8 +16,9 @@ import { formatDate } from "../lib/format.js";
 import { useMutation, useResource } from "../lib/useResource.js";
 
 /**
- * Categories are readable by every principal; writes go through the admin
- * middleware, so the editor only appears for administrators.
+ * Categories are readable and creatable by every principal; edits and deletes
+ * still go through the admin middleware, so those controls appear only for
+ * administrators.
  */
 export function CategoriesPage() {
   const { token, isAdmin, reportAuthError } = useAuth();
@@ -98,23 +98,17 @@ export function CategoriesPage() {
       eyebrow={isAdmin ? "Administration" : "Reference"}
       title="Categories"
       actions={
-        isAdmin ? (
-          <Button variant="primary" size="sm" onClick={() => openEditor()}>
-            New category
-          </Button>
-        ) : (
-          <Badge tone="neutral" dot>Read only</Badge>
-        )
+        <Button variant="primary" size="sm" onClick={() => openEditor()}>
+          New category
+        </Button>
       }
     >
       <Panel
         title={`Collections (${categories.length})`}
         action={
-          isAdmin ? (
-            <Button size="sm" variant="ghost" onClick={() => openEditor()}>
-              + Add
-            </Button>
-          ) : null
+          <Button size="sm" variant="ghost" onClick={() => openEditor()}>
+            + Add
+          </Button>
         }
       >
         {loading ? (

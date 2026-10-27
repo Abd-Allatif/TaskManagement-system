@@ -278,10 +278,12 @@ describe("category routes", () => {
     expect(res.status).toBe(401);
   });
 
-  it("POST /api/categories returns 403 for a non-admin token", async () => {
+  it("POST /api/categories returns 201 for a (non-admin) user", async () => {
+    prisma.category.create.mockResolvedValue({ id: "c1", name: "Work" });
+
     const res = await post("/api/categories", { name: "Work" }, userToken());
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(201);
   });
 
   it("POST /api/categories returns 400 when name is missing", async () => {

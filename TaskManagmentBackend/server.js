@@ -26,7 +26,7 @@ app.use(cors({
 // 3. Global rate limit — 100 requests per 15 minutes per IP
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 500,
   message: { message: "Too many requests, please try again later." },
   standardHeaders: true,
   legacyHeaders: false,

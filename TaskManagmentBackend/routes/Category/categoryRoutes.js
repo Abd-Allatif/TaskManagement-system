@@ -16,11 +16,11 @@ const {
 
 const router = express.Router();
 
-// Any authenticated principal can read categories.
+// Any authenticated principal can read categories and create new ones.
 router.use(verifyToken);
 
-// Writes are admin-only.
-router.post("/", verifyAdmin, createCategoryRules, validate, createCategory);
+// Every principal can create; edit/delete remain admin-only.
+router.post("/", createCategoryRules, validate, createCategory);
 
 router.get("/", getCategories);
 router.get("/:id", getCategoryById);
