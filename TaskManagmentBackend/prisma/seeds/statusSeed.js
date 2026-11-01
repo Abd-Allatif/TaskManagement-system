@@ -10,7 +10,8 @@ const STATUSES = [
 const run = async () => {
     for (const status of STATUSES) {
         await prisma.status.upsert({
-            where: {code: status.code},
+            // The code uniqueness is a (code, deleted_at) composite.
+            where: { code_deletedAt: { code: status.code, deletedAt: null } },
             update: {},
             create: status
         });

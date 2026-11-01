@@ -144,6 +144,7 @@ export function ChipMultiSelect({ options, value = [], onChange, emptyLabel }) {
             type="button"
             className="chip"
             aria-pressed={pressed}
+            title={option.title}
             onClick={() => toggle(option.id)}
           >
             {option.color ? (

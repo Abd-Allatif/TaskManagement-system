@@ -7,12 +7,12 @@ jest.mock("../prismaClient", () => ({
     count: jest.fn(),
   },
   status: {
-    findUnique: jest.fn(),
+    findFirst: jest.fn(),
   },
   category: {
     findMany: jest.fn(),
   },
-  user: {
+  membership: {
     findMany: jest.fn(),
   },
   admin: {
@@ -210,13 +210,13 @@ describe("getTasks", () => {
 });
 
 describe("getStatusByCode", () => {
-  it("finds a status by its unique code", async () => {
-    prisma.status.findUnique.mockResolvedValue({ id: "s1", code: "PENDING" });
+  it("finds a status by its unique code for live rows only", async () => {
+    prisma.status.findFirst.mockResolvedValue({ id: "s1", code: "PENDING" });
 
     const result = await taskRepository.getStatusByCode("PENDING");
 
-    expect(prisma.status.findUnique).toHaveBeenCalledWith({
-      where: { code: "PENDING" },
+    expect(prisma.status.findFirst).toHaveBeenCalledWith({
+      where: { code: "PENDING", deletedAt: null },
     });
     expect(result).toEqual({ id: "s1", code: "PENDING" });
   });
@@ -224,87 +224,99 @@ describe("getStatusByCode", () => {
 
 describe("findExistingCategoryIds", () => {
   it("returns [] without querying when there is nothing to check", async () => {
-    const result = await taskRepository.findExistingCategoryIds([]);
+    const result = await taskRepository.findExistingCategoryIds("w1", []);
 
     expect(result).toEqual([]);
     expect(prisma.category.findMany).not.toHaveBeenCalled();
   });
 
-  it("returns only the IDs that exist", async () => {
+  it("returns only the IDs that exist inside the workspace", async () => {
     prisma.category.findMany.mockResolvedValue([{ id: "c1" }]);
 
-    const result = await taskRepository.findExistingCategoryIds(["c1", "c2"]);
+    const result = await taskRepository.findExistingCategoryIds("w1", [
+      "c1",
+      "c2",
+    ]);
 
+    expect(prisma.category.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["c1", "c2"] }, workspaceId: "w1", deletedAt: null },
+      select: { id: true },
+    });
     expect(result).toEqual(["c1"]);
   });
 });
 
 describe("findExistingAssignables", () => {
   it("returns [] without querying when there is nothing to check", async () => {
-    const result = await taskRepository.findExistingAssignables([]);
+    const result = await taskRepository.findExistingAssignables([], "w1");
 
     expect(result).toEqual([]);
-    expect(prisma.user.findMany).not.toHaveBeenCalled();
+    expect(prisma.membership.findMany).not.toHaveBeenCalled();
     expect(prisma.admin.findMany).not.toHaveBeenCalled();
   });
 
-  it("checks each ID only in the table matching its assignableType", async () => {
-    prisma.user.findMany.mockResolvedValue([{ id: "u1" }]);
+  it("checks USER ids against workspace memberships and ADMIN ids globally", async () => {
+    prisma.membership.findMany.mockResolvedValue([{ userId: "u1" }]);
     prisma.admin.findMany.mockResolvedValue([{ id: "a1" }]);
 
-    const result = await taskRepository.findExistingAssignables([
-      { assignableType: "USER", assignableId: "u1" },
-      { assignableType: "ADMIN", assignableId: "a1" },
-    ]);
+    const result = await taskRepository.findExistingAssignables(
+      [
+        { assignableType: "USER", assignableId: "u1" },
+        { assignableType: "ADMIN", assignableId: "a1" },
+      ],
+      "w1"
+    );
 
-    expect(prisma.user.findMany).toHaveBeenCalledWith({
-      where: { id: { in: ["u1"] } },
-      select: { id: true },
+    expect(prisma.membership.findMany).toHaveBeenCalledWith({
+      where: { workspaceId: "w1", userId: { in: ["u1"] } },
+      select: { userId: true },
     });
     expect(prisma.admin.findMany).toHaveBeenCalledWith({
-      where: { id: { in: ["a1"] } },
+      where: { id: { in: ["a1"] }, deletedAt: null },
       select: { id: true },
     });
     expect(result).toEqual(["USER:u1", "ADMIN:a1"]);
   });
 
   it("does not query a table when no ID is declared for that type", async () => {
-    prisma.user.findMany.mockResolvedValue([{ id: "u1" }]);
+    prisma.membership.findMany.mockResolvedValue([{ userId: "u1" }]);
 
-    const result = await taskRepository.findExistingAssignables([
-      { assignableType: "USER", assignableId: "u1" },
-    ]);
+    const result = await taskRepository.findExistingAssignables(
+      [{ assignableType: "USER", assignableId: "u1" }],
+      "w1"
+    );
 
     expect(prisma.admin.findMany).not.toHaveBeenCalled();
     expect(result).toEqual(["USER:u1"]);
   });
 
   it("omits unknown assignableTypes from validity", async () => {
-    const result = await taskRepository.findExistingAssignables([
-      { assignableType: "GHOST", assignableId: "g1" },
-    ]);
+    const result = await taskRepository.findExistingAssignables(
+      [{ assignableType: "GHOST", assignableId: "g1" }],
+      "w1"
+    );
 
     expect(result).toEqual([]);
-    expect(prisma.user.findMany).not.toHaveBeenCalled();
+    expect(prisma.membership.findMany).not.toHaveBeenCalled();
     expect(prisma.admin.findMany).not.toHaveBeenCalled();
   });
 });
 
 describe("findExistingParentTask", () => {
   it("returns null without querying when no id is given", async () => {
-    const result = await taskRepository.findExistingParentTask("");
+    const result = await taskRepository.findExistingParentTask("w1", "");
 
     expect(result).toBeNull();
     expect(prisma.task.findFirst).not.toHaveBeenCalled();
   });
 
-  it("only accepts an existing, non-deleted root task as parent", async () => {
+  it("only accepts an existing, non-deleted root task of the same workspace", async () => {
     prisma.task.findFirst.mockResolvedValue({ id: "p1" });
 
-    const result = await taskRepository.findExistingParentTask("p1");
+    const result = await taskRepository.findExistingParentTask("w1", "p1");
 
     expect(prisma.task.findFirst).toHaveBeenCalledWith({
-      where: { id: "p1", deletedAt: null, parentTaskId: null },
+      where: { id: "p1", deletedAt: null, parentTaskId: null, workspaceId: "w1" },
       select: { id: true },
     });
     expect(result).toEqual({ id: "p1" });

@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.jsx";
 import { AuthProvider } from "./lib/auth.jsx";
+import { WorkspaceProvider } from "./lib/workspace.jsx";
 import { RouterProvider } from "./router/router.jsx";
 
 import "./styles/tokens.css";
@@ -20,7 +21,9 @@ createRoot(container).render(
   <React.StrictMode>
     <RouterProvider>
       <AuthProvider>
-        <App />
+        <WorkspaceProvider>
+          <App />
+        </WorkspaceProvider>
       </AuthProvider>
     </RouterProvider>
   </React.StrictMode>,

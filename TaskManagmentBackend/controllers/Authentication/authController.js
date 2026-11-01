@@ -2,6 +2,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { sendVerificationEmail } = require("../../services/emailService");
 const authRepository = require("../../repository/Authentication/authRepository");
+const workspaceRepository = require("../../repository/Workspace/workspaceRepository");
 
 // Register
 const register = async (req, res) => {
@@ -29,6 +30,32 @@ const register = async (req, res) => {
     password: hashedPassword,
   });
 
+  // Every user owns a default workspace from day one. createWorkspace seeds
+  // the OWNER/ADMIN/USER system roles and the OWNER membership atomically.
+  const { workspace } = await workspaceRepository.createWorkspace({
+    name: `${name}'s Workspace`,
+    ownerUserId: newUser.id,
+  });
+
+  // Optional invite auto-redemption: the invite token must be pending, not
+  // expired, and belong to this exact email.
+  let inviteRedeemed = false;
+  if (req.body.inviteToken) {
+    const invite = await workspaceRepository.getInviteByToken(
+      req.body.inviteToken
+    );
+
+    if (
+      invite &&
+      !invite.acceptedAt &&
+      new Date(invite.expiresAt) > new Date() &&
+      invite.email.toLowerCase() === email.toLowerCase()
+    ) {
+      await workspaceRepository.acceptInvite({ invite, userId: newUser.id });
+      inviteRedeemed = true;
+    }
+  }
+
   const verfificationCode = Math.floor(
     100000 + Math.random() * 900000,
   ).toString();
@@ -48,6 +75,8 @@ const register = async (req, res) => {
       message:
         "Registration Successfull Please Check You Email for Verification Code",
       userId: newUser.id,
+      workspace: { id: workspace.id, name: workspace.name },
+      inviteRedeemed,
     });
 };
 

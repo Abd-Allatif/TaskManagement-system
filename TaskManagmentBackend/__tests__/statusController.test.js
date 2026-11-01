@@ -40,6 +40,7 @@ describe("getStatuses", () => {
     await getStatuses(req, res);
 
     expect(prisma.status.findMany).toHaveBeenCalledWith({
+      where: { deletedAt: null },
       orderBy: { label: "asc" },
     });
     expect(res.status).toHaveBeenCalledWith(200);

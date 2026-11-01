@@ -14,19 +14,30 @@ import { api } from "../lib/api.js";
 import { useAuth } from "../lib/auth.jsx";
 import { formatDate } from "../lib/format.js";
 import { useMutation, useResource } from "../lib/useResource.js";
+import { useWorkspace } from "../lib/workspace.jsx";
 
 /**
- * Categories are readable and creatable by every principal; edits and deletes
- * still go through the admin middleware, so those controls appear only for
- * administrators.
+ * Categories are workspace-scoped: reads need an active workspace and the
+ * create/edit/delete affordances follow the caller's permission codes
+ * (category.create / category.update / category.delete). The server stays the
+ * enforcement point — these flags only hide controls.
  */
 export function CategoriesPage() {
   const { token, isAdmin, reportAuthError } = useAuth();
+  const { workspaceId, hasPermission, active } = useWorkspace();
   const toast = useToast();
+  const canCreate = hasPermission("category.create");
+  const canUpdate = hasPermission("category.update");
+  const canDelete = hasPermission("category.delete");
 
-  const list = useResource((signal) => api.listCategories(token), [token], {
-    onError: reportAuthError,
-  });
+  const list = useResource(
+    (signal) => api.listCategories(token, workspaceId),
+    [token, workspaceId],
+    {
+      enabled: Boolean(workspaceId) || isAdmin,
+      onError: reportAuthError,
+    },
+  );
   const categories = list.data?.categories || [];
   const loading = list.loading && categories.length === 0;
 
@@ -37,10 +48,12 @@ export function CategoriesPage() {
 
   const save = useMutation(async (payload) =>
     editing?.id
-      ? api.updateCategory(editing.id, payload, token)
-      : api.createCategory(payload, token),
+      ? api.updateCategory(editing.id, payload, token, workspaceId)
+      : api.createCategory(payload, token, workspaceId),
   );
-  const remove = useMutation(async () => api.deleteCategory(confirm.id, token));
+  const remove = useMutation(async () =>
+    api.deleteCategory(confirm.id, token, workspaceId),
+  );
 
   const openEditor = (category = null) => {
     setEditing(category || {});
@@ -95,20 +108,24 @@ export function CategoriesPage() {
 
   return (
     <AppShell
-      eyebrow={isAdmin ? "Administration" : "Reference"}
+      eyebrow={isAdmin ? "Administration" : `Workspace · ${active?.name || ""}`}
       title="Categories"
       actions={
-        <Button variant="primary" size="sm" onClick={() => openEditor()}>
-          New category
-        </Button>
+        canCreate ? (
+          <Button variant="primary" size="sm" onClick={() => openEditor()}>
+            New category
+          </Button>
+        ) : null
       }
     >
       <Panel
         title={`Collections (${categories.length})`}
         action={
-          <Button size="sm" variant="ghost" onClick={() => openEditor()}>
-            + Add
-          </Button>
+          canCreate ? (
+            <Button size="sm" variant="ghost" onClick={() => openEditor()}>
+              + Add
+            </Button>
+          ) : null
         }
       >
         {loading ? (
@@ -125,7 +142,7 @@ export function CategoriesPage() {
                   <th style={{ width: 54 }}>Colour</th>
                   <th>Name</th>
                   <th>Created</th>
-                  <th style={{ width: isAdmin ? 130 : 0 }} />
+                  <th style={{ width: canUpdate || canDelete ? 130 : 0 }} />
                 </tr>
               </thead>
               <tbody>
@@ -147,15 +164,19 @@ export function CategoriesPage() {
                     <td className="mono" style={{ fontSize: "0.78rem" }}>
                       {formatDate(category.createdAt)}
                     </td>
-                    {isAdmin ? (
+                    {canUpdate || canDelete ? (
                       <td>
                         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                          <Button size="sm" variant="ghost" onClick={() => openEditor(category)}>
-                            Edit
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => setConfirm(category)}>
-                            ✕
-                          </Button>
+                          {canUpdate ? (
+                            <Button size="sm" variant="ghost" onClick={() => openEditor(category)}>
+                              Edit
+                            </Button>
+                          ) : null}
+                          {canDelete ? (
+                            <Button size="sm" variant="ghost" onClick={() => setConfirm(category)}>
+                              ✕
+                            </Button>
+                          ) : null}
                         </div>
                       </td>
                     ) : null}

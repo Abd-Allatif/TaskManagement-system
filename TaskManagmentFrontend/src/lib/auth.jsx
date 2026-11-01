@@ -9,6 +9,7 @@ import {
 import { api, ApiError } from "./api";
 import {
   clearSession,
+  decodeToken,
   loadSession,
   ROLES,
   roleFromToken,
@@ -42,6 +43,18 @@ export function AuthProvider({ children }) {
       };
     }
 
+    // A JWT's exp claim is a local fact — an expired token needs no network
+    // round-trip. Without this, reopening the app after a break would sit on
+    // the boot screen for as long as the (pointless) /me probe takes.
+    const payload = decodeToken(stored.token);
+    if (payload?.exp && payload.exp * 1000 < Date.now()) {
+      applySession(null);
+      setStatus("ready");
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const role =
       stored.role === ROLES.ADMIN || roleFromToken(stored.token) === ROLES.ADMIN
         ? ROLES.ADMIN
@@ -49,7 +62,16 @@ export function AuthProvider({ children }) {
 
     const probe = role === ROLES.ADMIN ? api.meAdmin : api.meUser;
 
-    probe(stored.token)
+    // Cap the boot probe so a hung connection (sleeping laptop, dead dev
+    // proxy, stalled backend) cannot trap "Restoring session…" forever.
+    // On timeout the session is KEPT: the token may still be perfectly valid
+    // once the network returns, and each API failure surfaces gracefully.
+    const bootSignal =
+      typeof AbortSignal?.timeout === "function"
+        ? AbortSignal.timeout(10_000)
+        : undefined;
+
+    probe(stored.token, bootSignal)
       .then((data) => {
         if (cancelled) return;
         applySession({

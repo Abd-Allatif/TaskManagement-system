@@ -11,6 +11,8 @@ const categoryRoutes = require("./routes/Category/categoryRoutes");
 const statusRoutes = require("./routes/Status/statusRoutes");
 const adminRoutes = require("./routes/Admin/adminRoutes");
 const adminManagementRoutes = require("./routes/Admin/adminManagementRoutes");
+const workspaceRoutes = require("./routes/Workspace/workspaceRoutes");
+const permissionRoutes = require("./routes/Workspace/permissionRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -63,6 +65,8 @@ app.use('/api/auth',authLimiter, authRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/statuses", statusRoutes);
+app.use("/api/workspaces", workspaceRoutes);
+app.use("/api/permissions", permissionRoutes);
 
 app.use('/api/admin/auth', authLimiter, adminRoutes);
 app.use('/api/admin', adminManagementRoutes);

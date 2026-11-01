@@ -1,6 +1,7 @@
 jest.mock("../prismaClient", () => ({
   user: {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
   },
@@ -8,6 +9,36 @@ jest.mock("../prismaClient", () => ({
     create: jest.fn(),
     delete: jest.fn(),
     deleteMany: jest.fn(),
+  },
+  workspace: {
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+  },
+  role: {
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+  },
+  rolePermission: {
+    deleteMany: jest.fn(),
+    createMany: jest.fn(),
+  },
+  membership: {
+    findFirst: jest.fn(),
+    create: jest.fn(),
+    delete: jest.fn(),
+  },
+  workspaceInvite: {
+    findFirst: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    delete: jest.fn(),
+    deleteMany: jest.fn(),
+  },
+  permission: {
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
   },
   $transaction: jest.fn(),
 }));
@@ -38,9 +69,20 @@ const mockRes = () => {
   return res;
 };
 
+// Callback transactions (workspace creation) delegate to prisma itself;
+// array transactions fan out like the real client.
+prisma.$transaction.mockImplementation(async (arg) =>
+  Array.isArray(arg) ? Promise.all(arg) : arg(prisma)
+);
+
 beforeEach(() => {
   jest.clearAllMocks();
   process.env.JWT_SECRET = "test-secret";
+
+  // Defaults for the default-workspace creation flow in register().
+  prisma.workspace.create.mockResolvedValue({ id: "w1", name: "Abd's Workspace" });
+  prisma.role.create.mockResolvedValue({ id: "r1", name: "OWNER" });
+  prisma.membership.create.mockResolvedValue({});
 });
 
 describe("register", () => {
@@ -51,12 +93,12 @@ describe("register", () => {
     await register({ body: { name: "Abd" } }, res);
 
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.user.findFirst).not.toHaveBeenCalled();
     expect(prisma.user.create).not.toHaveBeenCalled();
   });
 
   it("returns 400 when the email already exists and does NOT create a user", async () => {
-    prisma.user.findUnique.mockResolvedValue({ id: "existing" });
+    prisma.user.findFirst.mockResolvedValue({ id: "existing" });
     const res = mockRes();
 
     await register({ body: validBody }, res);
@@ -68,7 +110,7 @@ describe("register", () => {
   });
 
   it("stores a HASHED password, not the plaintext", async () => {
-    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.findFirst.mockResolvedValue(null);
     bcrypt.hash.mockResolvedValue("hashed-value");
     prisma.user.create.mockResolvedValue({ id: "u1" });
     prisma.verificationToken.create.mockResolvedValue({});
@@ -83,7 +125,7 @@ describe("register", () => {
   });
 
   it("creates a 6-digit verification code expiring ~10 minutes out", async () => {
-    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.findFirst.mockResolvedValue(null);
     bcrypt.hash.mockResolvedValue("hashed");
     prisma.user.create.mockResolvedValue({ id: "u1" });
     prisma.verificationToken.create.mockResolvedValue({});
@@ -103,7 +145,7 @@ describe("register", () => {
   });
 
   it("sends the verification email and returns 201 on success", async () => {
-    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.findFirst.mockResolvedValue(null);
     bcrypt.hash.mockResolvedValue("hashed");
     prisma.user.create.mockResolvedValue({ id: "u1" });
     prisma.verificationToken.create.mockResolvedValue({});
@@ -123,11 +165,11 @@ describe("verifyEmail", () => {
     await verifyEmail({ body: { email: "a@b.com" } }, res);
 
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.user.findFirst).not.toHaveBeenCalled();
   });
 
   it("returns 404 for an unknown email", async () => {
-    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.findFirst.mockResolvedValue(null);
     const res = mockRes();
 
     await verifyEmail({ body: { email: "a@b.com", code: "123456" } }, res);
@@ -136,7 +178,7 @@ describe("verifyEmail", () => {
   });
 
   it("returns 400 when the email is already verified", async () => {
-    prisma.user.findUnique.mockResolvedValue({
+    prisma.user.findFirst.mockResolvedValue({
       id: "u1",
       emailVerifiedAt: new Date(),
       verificationTokens: [],
@@ -150,7 +192,7 @@ describe("verifyEmail", () => {
   });
 
   it("rejects a wrong code", async () => {
-    prisma.user.findUnique.mockResolvedValue({
+    prisma.user.findFirst.mockResolvedValue({
       id: "u1",
       emailVerifiedAt: null,
       verificationTokens: [{ token: "999999", expiresAt: new Date(Date.now() + 60000) }],
@@ -164,7 +206,7 @@ describe("verifyEmail", () => {
   });
 
   it("rejects an expired code even if it matches", async () => {
-    prisma.user.findUnique.mockResolvedValue({
+    prisma.user.findFirst.mockResolvedValue({
       id: "u1",
       emailVerifiedAt: null,
       verificationTokens: [{ token: "123456", expiresAt: new Date(Date.now() - 1000) }],
@@ -178,7 +220,7 @@ describe("verifyEmail", () => {
   });
 
   it("verifies the user and consumes the token in a transaction", async () => {
-    prisma.user.findUnique.mockResolvedValue({
+    prisma.user.findFirst.mockResolvedValue({
       id: "u1",
       emailVerifiedAt: null,
       verificationTokens: [{ id: "t1", token: "123456", expiresAt: new Date(Date.now() + 60000) }],
@@ -208,11 +250,11 @@ describe("login", () => {
     await login({ body: {} }, res);
 
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.user.findFirst).not.toHaveBeenCalled();
   });
 
   it("returns 401 for an unknown email (same message as bad password)", async () => {
-    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.findFirst.mockResolvedValue(null);
     const res = mockRes();
 
     await login({ body: { email: "a@b.com", password: "x" } }, res);
@@ -222,7 +264,7 @@ describe("login", () => {
   });
 
   it("returns 401 on a wrong password", async () => {
-    prisma.user.findUnique.mockResolvedValue({ id: "u1", password: "hashed" });
+    prisma.user.findFirst.mockResolvedValue({ id: "u1", password: "hashed" });
     bcrypt.compare.mockResolvedValue(false);
     const res = mockRes();
 
@@ -233,7 +275,7 @@ describe("login", () => {
   });
 
   it("blocks login with 403 when email is not verified, and issues NO token", async () => {
-    prisma.user.findUnique.mockResolvedValue({
+    prisma.user.findFirst.mockResolvedValue({
       id: "u1", email: "a@b.com", password: "hashed", emailVerifiedAt: null,
     });
     bcrypt.compare.mockResolvedValue(true);
@@ -246,7 +288,7 @@ describe("login", () => {
   });
 
   it("issues a JWT with userId+email on success", async () => {
-    prisma.user.findUnique.mockResolvedValue({
+    prisma.user.findFirst.mockResolvedValue({
       id: "u1", name: "Abd", email: "a@b.com", password: "hashed", emailVerifiedAt: new Date(),
     });
     bcrypt.compare.mockResolvedValue(true);
@@ -282,11 +324,11 @@ describe("resendCode", () => {
     await resendCode({ body: {} }, res);
 
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.user.findFirst).not.toHaveBeenCalled();
   });
 
   it("returns 404 for an unknown email", async () => {
-    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.findFirst.mockResolvedValue(null);
     const res = mockRes();
 
     await resendCode({ body: { email: "a@b.com" } }, res);
@@ -295,7 +337,7 @@ describe("resendCode", () => {
   });
 
   it("returns 400 when the email is already verified", async () => {
-    prisma.user.findUnique.mockResolvedValue({ id: "u1", emailVerifiedAt: new Date() });
+    prisma.user.findFirst.mockResolvedValue({ id: "u1", emailVerifiedAt: new Date() });
     const res = mockRes();
 
     await resendCode({ body: { email: "a@b.com" } }, res);
@@ -305,7 +347,7 @@ describe("resendCode", () => {
   });
 
   it("invalidates old tokens, issues a fresh code and emails it", async () => {
-    prisma.user.findUnique.mockResolvedValue({
+    prisma.user.findFirst.mockResolvedValue({
       id: "u1", name: "Abd", emailVerifiedAt: null,
     });
     prisma.verificationToken.deleteMany.mockResolvedValue({ count: 1 });

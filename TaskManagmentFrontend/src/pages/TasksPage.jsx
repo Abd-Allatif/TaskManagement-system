@@ -11,6 +11,7 @@ import { api } from "../lib/api.js";
 import { useAuth } from "../lib/auth.jsx";
 import { useResource } from "../lib/useResource.js";
 import { usePrincipals, useReference } from "../lib/useReference.js";
+import { useWorkspace } from "../lib/workspace.jsx";
 import { useRouter } from "../router/router.jsx";
 
 const SORT_FIELDS = [
@@ -29,6 +30,7 @@ const LIMIT = 10;
 export function TasksPage() {
   const { query, navigate } = useRouter();
   const { token, principal, role, isAdmin, reportAuthError } = useAuth();
+  const { workspaceId, hasPermission } = useWorkspace();
   const { statuses, categories } = useReference();
   const principals = usePrincipals(true);
 
@@ -94,8 +96,8 @@ export function TasksPage() {
   );
 
   const list = useResource(
-    (signal) => api.listTasks(apiQuery, token),
-    [token, JSON.stringify(apiQuery)],
+    (signal) => api.listTasks(apiQuery, token, workspaceId),
+    [token, workspaceId, JSON.stringify(apiQuery)],
     { onError: reportAuthError },
   );
 
@@ -107,9 +109,11 @@ export function TasksPage() {
       eyebrow="Operations"
       title="Tasks"
       actions={
-        <Button variant="primary" size="sm" onClick={() => setDrawerOpen(true)}>
-          New task
-        </Button>
+        hasPermission("task.create") ? (
+          <Button variant="primary" size="sm" onClick={() => setDrawerOpen(true)}>
+            New task
+          </Button>
+        ) : null
       }
     >
       <form

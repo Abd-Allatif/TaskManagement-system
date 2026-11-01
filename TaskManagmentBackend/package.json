@@ -12,6 +12,8 @@
     "lint": "eslint .",
     "test": "jest",
     "seed": "node prisma/seeds/seed.js",
+    "seed:permissions": "node prisma/seeds/permissionSeed.js",
+    "backfill:workspaces": "node prisma/seeds/backfillWorkspaces.js",
     "postinstall": "prisma skills sync || exit 0"
   },
   "dependencies": {

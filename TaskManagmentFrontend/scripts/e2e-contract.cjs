@@ -2,16 +2,26 @@
  * End-to-end contract check for the frontend, executed through the Vite dev
  * proxy on :3000 — the same origin path the browser uses.
  *
- * Creates a throwaway member account, walks register -> verify -> login ->
- * task CRUD, then deletes the account. Safe to re-run.
+ * Creates a throwaway account, walks register (auto workspace) -> verify ->
+ * login -> workspace list -> task CRUD (with X-Workspace-Id), then deletes
+ * everything it created. Safe to re-run.
  */
-require("dotenv").config({ path: "/home/jigsow/Documents/Programming/Express/TaskManagmentBackend/.env" });
-const prisma = require("/home/jigsow/Documents/Programming/Express/TaskManagmentBackend/prismaClient.js");
+// This script installs nothing: its runtime dependencies (dotenv, prisma)
+// come from the backend's node_modules, so everything is resolved by absolute
+// path and runs from a bare frontend checkout.
+const BACKEND_DIR =
+  "/home/jigsow/Documents/Programming/Express/TaskManagmentSystem/TaskManagmentBackend";
+
+require(`${BACKEND_DIR}/node_modules/dotenv`).config({
+  path: `${BACKEND_DIR}/.env`,
+});
+const prisma = require(`${BACKEND_DIR}/prismaClient.js`);
 
 const BASE = "http://localhost:3000/api";
 const EMAIL = "e2e-console@local.test";
 const PASSWORD = "console-pass-2026";
 let token = null;
+let workspaceId = null;
 
 const call = async (path, { method = "GET", body } = {}) => {
   const res = await fetch(BASE + path, {
@@ -19,6 +29,8 @@ const call = async (path, { method = "GET", body } = {}) => {
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      // Workspace scoping rides the header, exactly like the browser client.
+      ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -61,31 +73,21 @@ const expect = (cond, label) => {
     if (pre) await prisma.verificationToken.deleteMany({ where: { userId: pre.id } });
 
     await step("statuses are readable (unauthenticated)", async () => {
-      const { status, payload } = await call("/statuses");
+      const { status } = await call("/statuses");
       // verifyToken is required -> expect 401 without a token
       expect(status === 401, `expected 401, got ${status}`);
-      expect(payload?.message?.includes("Token") || payload?.message, "no message body");
     });
 
-    await step("register -> 201", async () => {
+    await step("register -> 201 with a default workspace", async () => {
       const res = await fetch(`${BASE}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Frontend Console Test", email: EMAIL, password: PASSWORD }),
       });
-
-      if (res.status === 500) {
-        // The backend's generated Prisma client is out of sync with
-        // prisma/schema.prisma: findByEmail() calls findUnique({ where: { email } })
-        // but the deployed client only exposes the email_deletedAt compound key.
-        const err = new Error(
-          "POST /auth/register returns 500 — backend Prisma client/schema drift (see report). Auth-gated checks skipped.",
-        );
-        err.backendSkipped = true;
-        throw err;
-      }
+      const payload = await res.json().catch(() => null);
 
       expect(res.status === 201, `expected 201, got ${res.status}`);
+      expect(payload?.workspace?.id, "registration did not return a workspace");
     });
 
     await step("read verification code from DB", async () => {
@@ -122,12 +124,6 @@ const expect = (cond, label) => {
       expect(payload?.user?.id === createdId, "me.id mismatch");
     });
 
-    await step("categories readable", async () => {
-      const { status, payload } = await call("/categories");
-      expect(status === 200, `categories got ${status}`);
-      expect(Array.isArray(payload?.categories), "categories not an array");
-    });
-
     let statusesList;
     await step("statuses readable with token", async () => {
       const { status, payload } = await call("/statuses");
@@ -135,6 +131,50 @@ const expect = (cond, label) => {
       statusesList = payload?.statuses || [];
       expect(statusesList.length > 0, "no statuses seeded");
       expect(statusesList[0]?.code && statusesList[0]?.label, "status shape wrong");
+    });
+
+    await step("GET /workspaces lists the default workspace with OWNER role", async () => {
+      const { status, payload } = await call("/workspaces");
+      expect(status === 200, `workspaces got ${status}`);
+      const list = payload?.workspaces || [];
+      expect(list.length === 1, `expected exactly 1 membership, got ${list.length}`);
+      const ws = list[0];
+      workspaceId = ws.id;
+      expect(ws.ownerUserId === createdId, "user is not the workspace owner");
+      expect(ws.isOwner === true, "isOwner flag missing");
+      expect(ws.role?.name === "OWNER", `role is ${ws.role?.name}, expected OWNER`);
+      expect(
+        Array.isArray(ws.role?.permissions) && ws.role.permissions.includes("task.create"),
+        "permission codes missing",
+      );
+    });
+
+    await step("task routes require the workspace header", async () => {
+      // One-shot header-less probe against another endpoint that must reject.
+      const res = await fetch(`${BASE}/tasks`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ title: "no header" }),
+      });
+      expect(res.status === 400, `expected 400 without header, got ${res.status}`);
+    });
+
+    await step("categories readable inside the workspace", async () => {
+      const { status, payload } = await call("/categories");
+      expect(status === 200, `categories got ${status}`);
+      expect(Array.isArray(payload?.categories), "categories not an array");
+    });
+
+    await step("POST /categories inside the workspace", async () => {
+      const res = await call("/categories", {
+        method: "POST",
+        body: { name: `e2e-cat-${Date.now()}` },
+      });
+      expect(res.status === 201, `category create got ${res.status}`);
+      expect(res.payload?.category?.workspaceId === workspaceId, "category not scoped");
     });
 
     let list;
@@ -151,6 +191,7 @@ const expect = (cond, label) => {
       expect(res.status === 201, `create got ${res.status}: ${JSON.stringify(res.payload)}`);
       list = res.payload.task;
       expect(list.title === "Proxy contract smoke test", "created task shape");
+      expect(list.workspaceId === workspaceId, "task not scoped to the workspace");
     });
 
     await step("GET /tasks list shape", async () => {
@@ -169,6 +210,7 @@ const expect = (cond, label) => {
       expect(res.status === 200, `get-by-id got ${res.status}`);
       expect(res.payload.task?.status?.code, "status relation missing");
       expect(Array.isArray(res.payload.task?.assignments), "assignments missing");
+      expect(res.payload.task?.workspace?.id === workspaceId, "workspace relation missing");
     });
 
     await step("PUT /tasks/:id (status + endFlag)", async () => {
@@ -179,6 +221,15 @@ const expect = (cond, label) => {
       });
       expect(res.status === 200, `update got ${res.status}: ${JSON.stringify(res.payload)}`);
       expect(res.payload.task?.endFlag === true, "endFlag not applied");
+    });
+
+    await step("GET /workspaces/:id/members", async () => {
+      const res = await call(`/workspaces/${workspaceId}/members`);
+      expect(res.status === 200, `members got ${res.status}`);
+      expect(
+        (res.payload?.members || []).some((m) => m.user?.id === createdId),
+        "creator missing from members",
+      );
     });
 
     await step("member is forbidden from admin overview", async () => {
@@ -199,15 +250,8 @@ const expect = (cond, label) => {
 
     console.log("\nALL E2E CHECKS PASSED");
   } catch (err) {
-    if (err.backendSkipped) {
-      console.warn(`\nSKIPPED: ${err.message}`);
-      console.warn(
-        "The frontend contract itself is unaffected — re-run this script after the backend is repaired.",
-      );
-    } else {
-      console.error(`\nE2E FAILED: ${err.message}`);
-      process.exitCode = 1;
-    }
+    console.error(`\nE2E FAILED: ${err.message}`);
+    process.exitCode = 1;
   } finally {
     // Remove the throwaway account and everything it created.
     const user = await prisma.user.findFirst({ where: { email: EMAIL } }).catch(() => null);
@@ -226,6 +270,10 @@ const expect = (cond, label) => {
       }
 
       await prisma.verificationToken.deleteMany({ where: { userId: user.id } }).catch(() => {});
+      // owner_user_id is ON DELETE RESTRICT: drop owned workspaces first...
+      await prisma.category.deleteMany({ where: { workspace: { ownerUserId: user.id } } }).catch(() => {});
+      await prisma.workspace.deleteMany({ where: { ownerUserId: user.id } }).catch(() => {});
+      // ...then the account cascades memberships, invites and tokens.
       await prisma.user.delete({ where: { id: user.id } }).catch(() => {});
     }
     await prisma.$disconnect();

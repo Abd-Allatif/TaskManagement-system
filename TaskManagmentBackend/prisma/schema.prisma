@@ -9,26 +9,33 @@ generator client {
 model User {
     id                 String              @id @default(uuid(7))
     name               String
-    email              String              @unique
+    email              String
     emailVerifiedAt    DateTime?           @map("email_verified_at")
     isVerified         Boolean             @default(false) @map("is_verified")
     password           String
     createdAt          DateTime            @default(now()) @map("created_at")
+    deletedAt          DateTime?           @map("deleted_at")
     verificationTokens VerificationToken[]
+    memberships        Membership[]
+    ownedWorkspaces    Workspace[]         @relation("OwnedWorkspaces")
+    sentInvites        WorkspaceInvite[]   @relation("SentWorkspaceInvites")
 
+    @@unique([email, deletedAt])
     @@map("users")
 }
 
 model Admin {
     id                      String                   @id @default(uuid(7))
     name                    String
-    email                   String                   @unique
+    email                   String
     emailVerifiedAt         DateTime?                @map("email_verified_at")
     isVerified              Boolean                  @default(false) @map("is_verified")
     password                String
     createdAt               DateTime                 @default(now()) @map("created_at")
+    deletedAt               DateTime?                @map("deleted_at")
     adminVerificationTokens AdminVerificationToken[]
 
+    @@unique([email, deletedAt])
     @@map("admins")
 }
 
@@ -55,11 +62,13 @@ model AdminVerificationToken {
 }
 
 model Status {
-    id    String @id @default(uuid(7))
-    code  String @unique
-    label String
-    tasks Task[]
+    id        String @id @default(uuid(7))
+    code      String
+    label     String
+    deletedAt DateTime? @map("deleted_at")
+    tasks     Task[]
 
+    @@unique([code, deletedAt])
     @@map("statuses")
 }
 
@@ -71,6 +80,8 @@ model Task {
     deadline      DateTime?
     statusId      String              @map("status_id")
     status        Status              @relation(fields: [statusId], references: [id])
+    workspaceId   String              @map("workspace_id")
+    workspace     Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Cascade)
     createdByType String              @map("created_by_type")
     createdById   String              @map("created_by_id")
     endFlag       Boolean             @default(false) @map("end_flag")
@@ -84,6 +95,7 @@ model Task {
 
     @@index([statusId])
     @@index([parentTaskId])
+    @@index([workspaceId])
     @@map("tasks")
 }
 
@@ -100,12 +112,19 @@ model TaskAssignment {
 }
 
 model Category {
-    id        String              @id @default(uuid(7))
-    name      String
-    color     String?
-    createdAt DateTime            @default(now()) @map("created_at")
-    tasks     CategoryTaskPivot[]
+    id          String              @id @default(uuid(7))
+    name        String
+    color       String?
+    workspaceId String              @map("workspace_id")
+    workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+    deletedAt   DateTime?           @map("deleted_at")
+    createdAt   DateTime            @default(now()) @map("created_at")
+    tasks       CategoryTaskPivot[]
 
+    // Replaces the legacy (name, deleted_at) unique: with workspace
+    // isolation, two workspaces may use the same category name.
+    @@unique([workspaceId, name, deletedAt])
+    @@index([workspaceId])
     @@map("categories")
 }
 
@@ -120,4 +139,97 @@ model CategoryTaskPivot {
     @@index([taskId])
     @@index([categoryId])
     @@map("category_task_pivot")
+}
+
+model Workspace {
+    id          String            @id @default(uuid(7))
+    name        String
+    ownerUserId String            @map("owner_user_id")
+    owner       User              @relation("OwnedWorkspaces", fields: [ownerUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+    deletedAt   DateTime?         @map("deleted_at")
+    createdAt   DateTime          @default(now()) @map("created_at")
+    roles       Role[]
+    memberships Membership[]
+    invites     WorkspaceInvite[]
+    tasks       Task[]
+    categories  Category[]
+
+    @@index([ownerUserId])
+    @@map("workspaces")
+}
+
+model Permission {
+    id              String           @id @default(uuid(7))
+    code            String           @unique
+    label           String
+    createdAt       DateTime         @default(now()) @map("created_at")
+    rolePermissions RolePermission[]
+
+    @@map("permissions")
+}
+
+// A role belongs to exactly one workspace; the OWNER/ADMIN/USER "system"
+// roles are seeded per workspace alongside any custom roles created later.
+model Role {
+    id              String           @id @default(uuid(7))
+    workspaceId     String           @map("workspace_id")
+    workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+    name            String
+    isSystem        Boolean          @default(false) @map("is_system")
+    createdAt       DateTime         @default(now()) @map("created_at")
+    rolePermissions RolePermission[]
+    memberships     Membership[]
+    invites         WorkspaceInvite[]
+
+    @@unique([workspaceId, name])
+    @@index([workspaceId])
+    @@map("roles")
+}
+
+model RolePermission {
+    id           String     @id @default(uuid(7))
+    roleId       String     @map("role_id")
+    role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+    permissionId String     @map("permission_id")
+    permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+    @@unique([roleId, permissionId])
+    @@index([roleId])
+    @@map("role_permissions")
+}
+
+// One active role per user per workspace. Being "ADMIN" in workspace A
+// grants nothing in workspace B — authorization is always workspace-scoped.
+model Membership {
+    id          String    @id @default(uuid(7))
+    workspaceId String    @map("workspace_id")
+    workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+    userId      String    @map("user_id")
+    user        User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+    roleId      String    @map("role_id")
+    role        Role      @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+    createdAt   DateTime  @default(now()) @map("created_at")
+
+    @@unique([userId, workspaceId])
+    @@index([workspaceId])
+    @@map("memberships")
+}
+
+model WorkspaceInvite {
+    id          String    @id @default(uuid(7))
+    workspaceId String    @map("workspace_id")
+    workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+    email       String
+    roleId      String    @map("role_id")
+    role        Role      @relation(fields: [roleId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+    token       String    @unique
+    invitedById String    @map("invited_by_id")
+    invitedBy   User      @relation("SentWorkspaceInvites", fields: [invitedById], references: [id], onDelete: Restrict, onUpdate: Cascade)
+    expiresAt   DateTime  @map("expires_at")
+    acceptedAt  DateTime? @map("accepted_at")
+    createdAt   DateTime  @default(now()) @map("created_at")
+
+    @@index([workspaceId])
+    @@index([email])
+    @@map("workspace_invites")
 }

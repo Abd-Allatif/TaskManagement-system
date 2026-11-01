@@ -2,6 +2,7 @@ jest.mock("../prismaClient", () => ({
   status: {
     findMany: jest.fn(),
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
@@ -22,6 +23,7 @@ describe("getStatuses", () => {
     const result = await statusRepository.getStatuses();
 
     expect(prisma.status.findMany).toHaveBeenCalledWith({
+      where: { deletedAt: null },
       orderBy: { label: "asc" },
     });
     expect(result).toEqual([{ id: "s1" }]);
@@ -42,13 +44,13 @@ describe("getStatusById", () => {
 });
 
 describe("getStatusByCode", () => {
-  it("finds a status by its unique code", async () => {
-    prisma.status.findUnique.mockResolvedValue({ id: "s1", code: "PENDING" });
+  it("finds a status by its unique code for live rows only", async () => {
+    prisma.status.findFirst.mockResolvedValue({ id: "s1", code: "PENDING" });
 
     const result = await statusRepository.getStatusByCode("PENDING");
 
-    expect(prisma.status.findUnique).toHaveBeenCalledWith({
-      where: { code: "PENDING" },
+    expect(prisma.status.findFirst).toHaveBeenCalledWith({
+      where: { code: "PENDING", deletedAt: null },
     });
     expect(result).toEqual({ id: "s1", code: "PENDING" });
   });

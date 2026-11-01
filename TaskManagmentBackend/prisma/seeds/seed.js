@@ -1,1 +1,1 @@
-require("./statusSeed");
+require("./adminSeed");

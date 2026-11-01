@@ -24,11 +24,13 @@ const mockRes = () => {
   return res;
 };
 
+// Every category route resolves req.workspace before the controller runs.
 const mockReq = (overrides = {}) => ({
   body: {},
   params: {},
   query: {},
   user: { userId: "user-1", email: "test@example.com" },
+  workspace: { id: "ws-1" },
   ...overrides,
 });
 
@@ -37,7 +39,7 @@ beforeEach(() => {
 });
 
 describe("createCategory", () => {
-  it("returns 201 and creates a category with correct data", async () => {
+  it("returns 201 and scopes the category to the active workspace", async () => {
     const category = { id: "cat-1", name: "Work", color: "#FF5733" };
     prisma.category.create.mockResolvedValue(category);
 
@@ -47,7 +49,7 @@ describe("createCategory", () => {
     await createCategory(req, res);
 
     expect(prisma.category.create).toHaveBeenCalledWith({
-      data: { name: "Work", color: "#FF5733" },
+      data: { workspaceId: "ws-1", name: "Work", color: "#FF5733" },
     });
     expect(res.status).toHaveBeenCalledWith(201);
     expect(res.json).toHaveBeenCalledWith({
@@ -65,13 +67,13 @@ describe("createCategory", () => {
     await createCategory(req, res);
 
     expect(prisma.category.create).toHaveBeenCalledWith({
-      data: { name: "Work", color: null },
+      data: { workspaceId: "ws-1", name: "Work", color: null },
     });
   });
 });
 
 describe("getCategories", () => {
-  it("returns 200 with all categories ordered by createdAt desc", async () => {
+  it("returns 200 with the workspace's categories ordered by createdAt desc", async () => {
     const categories = [{ id: "c1" }, { id: "c2" }];
     prisma.category.findMany.mockResolvedValue(categories);
 
@@ -81,6 +83,7 @@ describe("getCategories", () => {
     await getCategories(req, res);
 
     expect(prisma.category.findMany).toHaveBeenCalledWith({
+      where: { workspaceId: "ws-1", deletedAt: null },
       orderBy: { createdAt: "desc" },
     });
     expect(res.status).toHaveBeenCalledWith(200);
@@ -89,7 +92,7 @@ describe("getCategories", () => {
 });
 
 describe("getCategoryById", () => {
-  it("returns 200 with the category when found", async () => {
+  it("returns 200 with the category when found in the workspace", async () => {
     const category = { id: "cat-1", name: "Work" };
     prisma.category.findFirst.mockResolvedValue(category);
 
@@ -99,13 +102,13 @@ describe("getCategoryById", () => {
     await getCategoryById(req, res);
 
     expect(prisma.category.findFirst).toHaveBeenCalledWith({
-      where: { id: "cat-1" },
+      where: { id: "cat-1", workspaceId: "ws-1", deletedAt: null },
     });
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({ category });
   });
 
-  it("returns 404 when category is not found", async () => {
+  it("returns 404 when the category is missing or belongs to another workspace", async () => {
     prisma.category.findFirst.mockResolvedValue(null);
 
     const req = mockReq({ params: { id: "missing" } });
@@ -119,7 +122,9 @@ describe("getCategoryById", () => {
 });
 
 describe("updateCategory", () => {
-  it("returns 200 with updated category and forwards fields", async () => {
+  it("loads through the workspace scope then updates", async () => {
+    const existing = { id: "cat-1", workspaceId: "ws-1", name: "Work" };
+    prisma.category.findFirst.mockResolvedValue(existing);
     const updated = { id: "cat-1", name: "Personal", color: "#000000" };
     prisma.category.update.mockResolvedValue(updated);
 
@@ -142,23 +147,28 @@ describe("updateCategory", () => {
     });
   });
 
-  it("propagates P2025 rejection (handled by errorHandler as 404)", async () => {
-    const err = new Error("Record not found");
-    err.code = "P2025";
-    prisma.category.update.mockRejectedValue(err);
+  it("returns 404 when the category is not in the workspace", async () => {
+    prisma.category.findFirst.mockResolvedValue(null);
 
     const req = mockReq({
-      params: { id: "missing" },
+      params: { id: "cat-other-workspace" },
       body: { name: "X" },
     });
     const res = mockRes();
 
-    await expect(updateCategory(req, res)).rejects.toMatchObject({ code: "P2025" });
+    await updateCategory(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(prisma.category.update).not.toHaveBeenCalled();
   });
 });
 
 describe("deleteCategory", () => {
-  it("deletes the category and returns 200", async () => {
+  it("loads through the workspace scope then deletes", async () => {
+    prisma.category.findFirst.mockResolvedValue({
+      id: "cat-1",
+      workspaceId: "ws-1",
+    });
     prisma.category.delete.mockResolvedValue({ id: "cat-1" });
 
     const req = mockReq({ params: { id: "cat-1" } });
@@ -175,14 +185,15 @@ describe("deleteCategory", () => {
     });
   });
 
-  it("propagates P2025 rejection (handled by errorHandler as 404)", async () => {
-    const err = new Error("Record not found");
-    err.code = "P2025";
-    prisma.category.delete.mockRejectedValue(err);
+  it("returns 404 when the category is not in the workspace", async () => {
+    prisma.category.findFirst.mockResolvedValue(null);
 
-    const req = mockReq({ params: { id: "missing" } });
+    const req = mockReq({ params: { id: "foreign-cat" } });
     const res = mockRes();
 
-    await expect(deleteCategory(req, res)).rejects.toMatchObject({ code: "P2025" });
+    await deleteCategory(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(prisma.category.delete).not.toHaveBeenCalled();
   });
 });

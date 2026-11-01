@@ -1,12 +1,17 @@
 import { ToastProvider } from "./components/Toast.jsx";
+import { AppShell } from "./components/AppShell.jsx";
+import { Button, EmptyState } from "./components/ui.jsx";
 import { useAuth } from "./lib/auth.jsx";
+import { useWorkspace } from "./lib/workspace.jsx";
 import { matchPath, Navigate, useRouter } from "./router/router.jsx";
 import { AdminOverviewPage } from "./pages/AdminOverviewPage.jsx";
 import { CategoriesPage } from "./pages/CategoriesPage.jsx";
 import { DashboardPage } from "./pages/DashboardPage.jsx";
 import { LoginPage } from "./pages/auth/LoginPage.jsx";
+import { MembersPage } from "./pages/MembersPage.jsx";
 import { ProfilePage } from "./pages/ProfilePage.jsx";
 import { RegisterPage } from "./pages/auth/RegisterPage.jsx";
+import { RolesPage } from "./pages/RolesPage.jsx";
 import { StatusesPage } from "./pages/StatusesPage.jsx";
 import { TaskDetailPage } from "./pages/TaskDetailPage.jsx";
 import { TasksPage } from "./pages/TasksPage.jsx";
@@ -30,9 +35,49 @@ const PROTECTED_ROUTES = [
   { path: "/tasks/:id", element: (params) => <TaskDetailPage id={params.id} /> },
   { path: "/categories", element: () => <CategoriesPage /> },
   { path: "/statuses", element: () => <StatusesPage /> },
+  { path: "/workspace/members", element: () => <MembersPage /> },
+  { path: "/workspace/roles", element: () => <RolesPage /> },
   { path: "/profile", element: () => <ProfilePage /> },
   { path: "/admin", element: () => <Navigate to="/admin/overview" /> },
 ];
+
+/**
+ * Workspace screens require a resolved workspace context before their first
+ * request can carry a valid X-Workspace-Id header. Platform admins may
+ * proceed without one (sudo mode); members wait for the workspace list.
+ */
+function WorkspaceBoot({ children }) {
+  const { status, active, isAdmin, workspaces, refresh } = useWorkspace();
+
+  if (status === "loading") return <BootScreen />;
+
+  // Not loading and still nothing selected: the workspace list either failed
+  // or came back empty. Never leave the member on a boot spinner — surface
+  // the problem with a way back in.
+  if (!isAdmin && !active) {
+    return (
+      <AppShell eyebrow="Workspace" title="No workspace available">
+        <div className="panel">
+          <EmptyState
+            mark="▦"
+            title="The console could not resolve your workspace"
+            description={
+              workspaces.length === 0
+                ? "Your account has no workspace memberships yet. Reload once you have been invited, or contact the workspace owner."
+                : "The workspace list could not be loaded. Check that the backend is running, then retry."
+            }
+            action={
+              <Button size="sm" variant="primary" onClick={refresh}>
+                Retry
+              </Button>
+            }
+          />
+        </div>
+      </AppShell>
+    );
+  }
+  return children;
+}
 
 /** Admin-only management area. */
 const ADMIN_ROUTES = [{ path: "/admin/overview", element: () => <AdminOverviewPage /> }];
@@ -63,7 +108,8 @@ function Routes() {
   const adminMatch = resolve(ADMIN_ROUTES, pathname);
   if (adminMatch) return isAdmin ? adminMatch : <ForbiddenPage />;
 
-  return resolve(PROTECTED_ROUTES, pathname) || <NotFoundPage />;
+  // Every protected screen talks to the workspace-scoped API surface.
+  return <WorkspaceBoot>{resolve(PROTECTED_ROUTES, pathname) || <NotFoundPage />}</WorkspaceBoot>;
 }
 
 export function App() {

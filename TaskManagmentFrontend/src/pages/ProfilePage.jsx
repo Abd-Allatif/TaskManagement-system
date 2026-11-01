@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { AppShell } from "../components/AppShell.jsx";
 import {
   Avatar,
@@ -7,15 +8,20 @@ import {
   LoadingRow,
   Panel,
   RoleBadge,
+  TextInput,
 } from "../components/ui.jsx";
+import { useToast } from "../components/Toast.jsx";
 import { api } from "../lib/api.js";
 import { useAuth } from "../lib/auth.jsx";
 import { formatDateTime } from "../lib/format.js";
 import { useResource } from "../lib/useResource.js";
+import { useWorkspace } from "../lib/workspace.jsx";
 import { useRouter } from "../router/router.jsx";
 
 export function ProfilePage() {
   const { token, role, isAdmin, session, reportAuthError, signOut } = useAuth();
+  const { refresh } = useWorkspace();
+  const toast = useToast();
   const { navigate } = useRouter();
 
   const isAdminRealm = role === "ADMIN";
@@ -24,6 +30,26 @@ export function ProfilePage() {
     [token, isAdminRealm],
     { onError: reportAuthError },
   );
+
+  const [inviteCode, setInviteCode] = useState("");
+  const [redeeming, setRedeeming] = useState(false);
+
+  const redeemInvite = async (event) => {
+    event.preventDefault();
+    if (!inviteCode.trim()) return;
+    setRedeeming(true);
+    try {
+      const result = await api.redeemInvite({ token: inviteCode.trim() }, token);
+      setInviteCode("");
+      toast.success(`Joined "${result?.workspace?.name || "workspace"}".`);
+      // Pull the new membership into the switcher and select it.
+      refresh();
+    } catch (err) {
+      toast.error(err?.message || "Could not redeem the invite.");
+    } finally {
+      setRedeeming(false);
+    }
+  };
 
   const profile =
     me.data?.admin || me.data?.user || session?.principal || null;
@@ -112,6 +138,28 @@ export function ProfilePage() {
             </Button>
           </div>
         </Panel>
+
+        {!isAdminRealm ? (
+          <Panel title="Redeem an invite">
+            <p className="muted" style={{ marginBottom: "var(--s4)" }}>
+              Got an invite token from a workspace member? Paste it here to join
+              — tokens are shared manually and expire after 7 days.
+            </p>
+            <form onSubmit={redeemInvite} style={{ display: "flex", gap: "var(--s2)" }}>
+              <div style={{ flex: 1 }}>
+                <TextInput
+                  placeholder="paste the invite token"
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value)}
+                  disabled={redeeming}
+                />
+              </div>
+              <Button variant="primary" type="submit" loading={redeeming}>
+                Join workspace
+              </Button>
+            </form>
+          </Panel>
+        ) : null}
       </div>
     </AppShell>
   );

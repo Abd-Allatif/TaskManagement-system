@@ -3,6 +3,7 @@ const prisma = require("../../prismaClient");
 // this ensures evert task fetch returns its relatkionships consistently
 const taskInclude = {
   status: true,
+  workspace: { select: { id: true, name: true } },
   assignments: true,
   categories: { include: { category: true } },
   subTasks: true,
@@ -33,9 +34,15 @@ const parsePagination = (filters = {}) => {
   return { page, limit, skip: (page - 1) * limit };
 };
 
-// Builds the shared `where` clause for listing tasks.
+// Builds the shared `where` clause for listing tasks. `workspaceId` is the
+// workspace-isolation filter — the caller (controller) always supplies it
+// for members and leaves it undefined only for a platform admin sweeping
+// across workspaces in sudo mode.
 const buildTaskWhere = (filters = {}) => ({
   deletedAt: null,
+  ...(filters.workspaceId !== undefined && {
+    workspaceId: filters.workspaceId,
+  }),
   ...(filters.statusId && { statusId: filters.statusId }),
   ...(filters.createdById && {
     createdById: filters.createdById,
@@ -86,12 +93,16 @@ const createTask = async (data) => {
 
 // Read
 
-const getTaskById = async (id) => {
-  return prisma.task.findFirst({
-    where: { id, deletedAt: null },
+const getTaskById = (id, workspaceId) =>
+  prisma.task.findFirst({
+    where: {
+      id,
+      deletedAt: null,
+      // undefined = platform admin sweep; a concrete id = member scoping
+      ...(workspaceId !== undefined && { workspaceId }),
+    },
     include: taskInclude,
   });
-};
 
 const getTasks = async (filters = {}) => {
   const { page, limit, skip } = parsePagination(filters);
@@ -121,21 +132,24 @@ const getTasks = async (filters = {}) => {
   };
 };
 
-const getStatusByCode = (code) => prisma.status.findUnique({ where: { code } });
+const getStatusByCode = (code) =>
+  prisma.status.findFirst({ where: { code, deletedAt: null } });
 
-const findExistingCategoryIds = async (ids) => {
-  if (!ids?.length) return [];
+const findExistingCategoryIds = (workspaceId, ids) => {
+  if (!ids?.length) return Promise.resolve([]);
 
-  const found = await prisma.category.findMany({
-    where: { id: { in: ids } },
-    select: { id: true },
-  });
-
-  return found.map((c) => c.id);
+  // Categories are workspace-scoped: a category from another workspace must
+  // not validate as "existing" for a task in here.
+  return prisma.category
+    .findMany({
+      where: { id: { in: ids }, workspaceId, deletedAt: null },
+      select: { id: true },
+    })
+    .then((found) => found.map((c) => c.id));
 };
 
-const findExistingAssignables = async (assignments) => {
-  if (!assignments?.length) return [];
+const findExistingAssignables = (assignments, workspaceId) => {
+  if (!assignments?.length) return Promise.resolve([]);
 
   // Group the requested IDs by type, so each table is only queried with the
   // IDs that are supposed to live in it (`assignableType` picks the table).
@@ -144,36 +158,47 @@ const findExistingAssignables = async (assignments) => {
     if (idsByType[assignableType]) idsByType[assignableType].add(assignableId);
   }
 
-  const [users, admins] = await Promise.all([
-    idsByType.USER.size
-      ? prisma.user.findMany({
-          where: { id: { in: [...idsByType.USER] } },
-          select: { id: true },
-        })
-      : [],
-    idsByType.ADMIN.size
-      ? prisma.admin.findMany({
-          where: { id: { in: [...idsByType.ADMIN] } },
-          select: { id: true },
-        })
-      : [],
-  ]);
+  const userLookup = () => {
+    const userIds = [...idsByType.USER];
+    if (userIds.length === 0) return Promise.resolve([]);
 
-  // A user ID found in the Admin table (or vice versa) must NOT count as
-  // valid, so validity is tracked as a TYPE:id pair, not a bare ID.
-  return [
-    ...users.map((u) => `USER:${u.id}`),
-    ...admins.map((a) => `ADMIN:${a.id}`),
-  ];
+    // Assignees must be members of the task's workspace. The membership
+    // filter also rejects users from other workspaces even when the id
+    // exists globally.
+    return prisma.membership
+      .findMany({
+        where: { workspaceId, userId: { in: userIds } },
+        select: { userId: true },
+      })
+      .then((m) => m.map((m) => m.userId));
+  };
+
+  const adminLookup = () => {
+    const adminIds = [...idsByType.ADMIN];
+    if (adminIds.length === 0) return Promise.resolve([]);
+
+    return prisma.admin
+      .findMany({
+        where: { id: { in: adminIds }, deletedAt: null },
+        select: { id: true },
+      })
+      .then((a) => a.map((a) => a.id));
+  };
+
+  return Promise.all([userLookup(), adminLookup()]).then(([users, admins]) => [
+    ...users.map((u) => `USER:${u}`),
+    ...admins.map((a) => `ADMIN:${a}`),
+  ]);
 };
 
-// A valid parent must exist, not be soft-deleted, and be a root task itself
-// (subtasks cannot have children — nesting stays one level deep).
-const findExistingParentTask = async (id) => {
-  if (!id) return null;
+// A valid parent must exist, not be soft-deleted, live in the same workspace
+// (isolation), and be a root task itself (subtasks cannot have children —
+// nesting stays one level deep).
+const findExistingParentTask = (workspaceId, id) => {
+  if (!id) return Promise.resolve(null);
 
   return prisma.task.findFirst({
-    where: { id, deletedAt: null, parentTaskId: null },
+    where: { id, deletedAt: null, parentTaskId: null, workspaceId },
     select: { id: true },
   });
 };

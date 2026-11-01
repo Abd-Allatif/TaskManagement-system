@@ -17,6 +17,7 @@ import {
 } from "../lib/format.js";
 import { useResource } from "../lib/useResource.js";
 import { useReference } from "../lib/useReference.js";
+import { useWorkspace } from "../lib/workspace.jsx";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -28,6 +29,7 @@ export function DashboardPage() {
     isAdmin,
     reportAuthError,
   } = useAuth();
+  const { workspaceId, active } = useWorkspace();
   const { statuses } = useReference();
 
   const scope = useMemo(
@@ -46,14 +48,22 @@ export function DashboardPage() {
 
   const recent = useResource(
     (signal) =>
-      api.listTasks({ limit: 6, sortBy: "createDate", sortOrder: "desc" }, token),
-    [token],
+      api.listTasks(
+        { limit: 6, sortBy: "createDate", sortOrder: "desc" },
+        token,
+        workspaceId,
+      ),
+    [token, workspaceId],
     { onError: reportAuthError },
   );
 
-  const mine = useResource((signal) => api.listTasks({ ...scope, limit: 100 }, token), [token, scope], {
-    onError: reportAuthError,
-  });
+  const mine = useResource(
+    (signal) => api.listTasks({ ...scope, limit: 100 }, token, workspaceId),
+    [token, workspaceId, scope],
+    {
+      onError: reportAuthError,
+    },
+  );
 
   const tasks = mine.data?.tasks || [];
   const loading = mine.loading && !tasks.length;
@@ -106,7 +116,9 @@ export function DashboardPage() {
 
   return (
     <AppShell
-      eyebrow={isAdmin ? "Operations" : "Workspace"}
+      eyebrow={
+        isAdmin ? "Operations" : `Workspace · ${active?.name || "…"}`.trim()
+      }
       title={`Good to see you, ${(principal?.name || "operator").split(" ")[0]}`}
     >
       <div className="grid grid--stats stagger">

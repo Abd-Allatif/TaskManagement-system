@@ -1,6 +1,7 @@
 jest.mock("../prismaClient", () => ({
   admin: {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
   },
@@ -51,12 +52,12 @@ describe("register", () => {
     await register({ body: { name: "Abd" } }, res);
 
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(prisma.admin.findUnique).not.toHaveBeenCalled();
+    expect(prisma.admin.findFirst).not.toHaveBeenCalled();
     expect(prisma.admin.create).not.toHaveBeenCalled();
   });
 
   it("returns 400 when the email already exists and does NOT create an admin", async () => {
-    prisma.admin.findUnique.mockResolvedValue({ id: "existing" });
+    prisma.admin.findFirst.mockResolvedValue({ id: "existing" });
     const res = mockRes();
 
     await register({ body: validBody }, res);
@@ -68,7 +69,7 @@ describe("register", () => {
   });
 
   it("stores a HASHED password, not the plaintext", async () => {
-    prisma.admin.findUnique.mockResolvedValue(null);
+    prisma.admin.findFirst.mockResolvedValue(null);
     bcrypt.hash.mockResolvedValue("hashed-value");
     prisma.admin.create.mockResolvedValue({ id: "a1" });
     prisma.adminVerificationToken.create.mockResolvedValue({});
@@ -83,7 +84,7 @@ describe("register", () => {
   });
 
   it("creates a 6-digit verification code expiring ~10 minutes out", async () => {
-    prisma.admin.findUnique.mockResolvedValue(null);
+    prisma.admin.findFirst.mockResolvedValue(null);
     bcrypt.hash.mockResolvedValue("hashed");
     prisma.admin.create.mockResolvedValue({ id: "a1" });
     prisma.adminVerificationToken.create.mockResolvedValue({});
@@ -103,7 +104,7 @@ describe("register", () => {
   });
 
   it("sends the verification email and returns 201 on success", async () => {
-    prisma.admin.findUnique.mockResolvedValue(null);
+    prisma.admin.findFirst.mockResolvedValue(null);
     bcrypt.hash.mockResolvedValue("hashed");
     prisma.admin.create.mockResolvedValue({ id: "a1" });
     prisma.adminVerificationToken.create.mockResolvedValue({});
@@ -127,11 +128,11 @@ describe("verifyEmail", () => {
     await verifyEmail({ body: { email: "a@b.com" } }, res);
 
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(prisma.admin.findUnique).not.toHaveBeenCalled();
+    expect(prisma.admin.findFirst).not.toHaveBeenCalled();
   });
 
   it("returns 404 for an unknown email", async () => {
-    prisma.admin.findUnique.mockResolvedValue(null);
+    prisma.admin.findFirst.mockResolvedValue(null);
     const res = mockRes();
 
     await verifyEmail({ body: { email: "a@b.com", code: "123456" } }, res);
@@ -140,7 +141,7 @@ describe("verifyEmail", () => {
   });
 
   it("returns 400 when the email is already verified", async () => {
-    prisma.admin.findUnique.mockResolvedValue({
+    prisma.admin.findFirst.mockResolvedValue({
       id: "a1",
       emailVerifiedAt: new Date(),
       adminVerificationTokens: [],
@@ -154,7 +155,7 @@ describe("verifyEmail", () => {
   });
 
   it("rejects a wrong code", async () => {
-    prisma.admin.findUnique.mockResolvedValue({
+    prisma.admin.findFirst.mockResolvedValue({
       id: "a1",
       emailVerifiedAt: null,
       adminVerificationTokens: [{ token: "999999", expiresAt: new Date(Date.now() + 60000) }],
@@ -168,7 +169,7 @@ describe("verifyEmail", () => {
   });
 
   it("rejects an expired code even if it matches", async () => {
-    prisma.admin.findUnique.mockResolvedValue({
+    prisma.admin.findFirst.mockResolvedValue({
       id: "a1",
       emailVerifiedAt: null,
       adminVerificationTokens: [{ token: "123456", expiresAt: new Date(Date.now() - 1000) }],
@@ -182,7 +183,7 @@ describe("verifyEmail", () => {
   });
 
   it("verifies the admin and consumes the token in a transaction", async () => {
-    prisma.admin.findUnique.mockResolvedValue({
+    prisma.admin.findFirst.mockResolvedValue({
       id: "a1",
       emailVerifiedAt: null,
       adminVerificationTokens: [{ id: "t1", token: "123456", expiresAt: new Date(Date.now() + 60000) }],
@@ -212,11 +213,11 @@ describe("login", () => {
     await login({ body: {} }, res);
 
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(prisma.admin.findUnique).not.toHaveBeenCalled();
+    expect(prisma.admin.findFirst).not.toHaveBeenCalled();
   });
 
   it("returns 401 for an unknown email (same message as bad password)", async () => {
-    prisma.admin.findUnique.mockResolvedValue(null);
+    prisma.admin.findFirst.mockResolvedValue(null);
     const res = mockRes();
 
     await login({ body: { email: "a@b.com", password: "x" } }, res);
@@ -226,7 +227,7 @@ describe("login", () => {
   });
 
   it("returns 401 on a wrong password", async () => {
-    prisma.admin.findUnique.mockResolvedValue({ id: "a1", password: "hashed" });
+    prisma.admin.findFirst.mockResolvedValue({ id: "a1", password: "hashed" });
     bcrypt.compare.mockResolvedValue(false);
     const res = mockRes();
 
@@ -237,7 +238,7 @@ describe("login", () => {
   });
 
   it("blocks login with 403 when email is not verified, and issues NO token", async () => {
-    prisma.admin.findUnique.mockResolvedValue({
+    prisma.admin.findFirst.mockResolvedValue({
       id: "a1", email: "a@b.com", password: "hashed", emailVerifiedAt: null,
     });
     bcrypt.compare.mockResolvedValue(true);
@@ -250,7 +251,7 @@ describe("login", () => {
   });
 
   it("issues a JWT with adminId, email and type ADMIN on success", async () => {
-    prisma.admin.findUnique.mockResolvedValue({
+    prisma.admin.findFirst.mockResolvedValue({
       id: "a1", name: "Abd", email: "a@b.com", password: "hashed", emailVerifiedAt: new Date(),
     });
     bcrypt.compare.mockResolvedValue(true);
@@ -286,11 +287,11 @@ describe("resendCode", () => {
     await resendCode({ body: {} }, res);
 
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(prisma.admin.findUnique).not.toHaveBeenCalled();
+    expect(prisma.admin.findFirst).not.toHaveBeenCalled();
   });
 
   it("returns 404 for an unknown email", async () => {
-    prisma.admin.findUnique.mockResolvedValue(null);
+    prisma.admin.findFirst.mockResolvedValue(null);
     const res = mockRes();
 
     await resendCode({ body: { email: "a@b.com" } }, res);
@@ -299,7 +300,7 @@ describe("resendCode", () => {
   });
 
   it("returns 400 when the email is already verified", async () => {
-    prisma.admin.findUnique.mockResolvedValue({ id: "a1", emailVerifiedAt: new Date() });
+    prisma.admin.findFirst.mockResolvedValue({ id: "a1", emailVerifiedAt: new Date() });
     const res = mockRes();
 
     await resendCode({ body: { email: "a@b.com" } }, res);
@@ -309,7 +310,7 @@ describe("resendCode", () => {
   });
 
   it("invalidates old tokens, issues a fresh code and emails it", async () => {
-    prisma.admin.findUnique.mockResolvedValue({
+    prisma.admin.findFirst.mockResolvedValue({
       id: "a1", name: "Abd", emailVerifiedAt: null,
     });
     prisma.adminVerificationToken.deleteMany.mockResolvedValue({ count: 1 });

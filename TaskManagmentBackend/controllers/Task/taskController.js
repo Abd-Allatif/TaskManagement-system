@@ -22,8 +22,11 @@ const createTask = async (req, res) => {
     });
   }
 
-  // Validate category IDs exist
-  const validCategoryIds = await taskRepository.findExistingCategoryIds(categories);
+  // Validate category IDs exist **in this workspace**
+  const validCategoryIds = await taskRepository.findExistingCategoryIds(
+    req.workspace.id,
+    categories
+  );
   const invalidCategories = (categories || []).filter(
     (id) => !validCategoryIds.includes(id)
   );
@@ -34,11 +37,16 @@ const createTask = async (req, res) => {
   }
 
   // Validate assignment IDs exist (TYPE:id pairs, so a USER id pointing at an
-  // admin record is rejected)
-  const validAssignables = await taskRepository.findExistingAssignables(assignments);
-  const invalidAssignments = (assignments || []).filter(
-    (a) => !validAssignables.includes(`${a.assignableType}:${a.assignableId}`)
+  // admin record is rejected). Assignees must be members of this workspace.
+  const validAssignables = await taskRepository.findExistingAssignables(
+    assignments,
+    req.workspace.id
   );
+  const invalidAssignments = (assignments || [])
+    .filter(
+      (a) => !validAssignables.includes(`${a.assignableType}:${a.assignableId}`)
+    );
+
   if (invalidAssignments.length > 0) {
     return res.status(400).json({
       message: `Invalid assignable IDs: ${invalidAssignments
@@ -47,9 +55,13 @@ const createTask = async (req, res) => {
     });
   }
 
-  // Subtask: the parent must exist, be alive and be a root task
+  // Subtask: the parent must exist, be alive, live in this workspace, and be
+  // a root task
   if (parentTaskId) {
-    const parent = await taskRepository.findExistingParentTask(parentTaskId);
+    const parent = await taskRepository.findExistingParentTask(
+      req.workspace.id,
+      parentTaskId
+    );
     if (!parent) {
       return res.status(400).json({
         message:
@@ -59,6 +71,9 @@ const createTask = async (req, res) => {
   }
 
   const task = await taskRepository.createTask({
+    // Every task lives in exactly one workspace; creation targets the
+    // resolved one (sudo-mode admins must also have sent the header).
+    workspaceId: req.workspace.id,
     title,
     description,
     deadline,
@@ -72,15 +87,9 @@ const createTask = async (req, res) => {
   return res.status(201).json({ message: "Task created successfully", task });
 };
 
-// Read single
+// Read single — the middleware chain loads the task and enforces isolation
 const getTaskById = async (req, res) => {
-  const task = await taskRepository.getTaskById(req.params.id);
-
-  if (!task) {
-    return res.status(404).json({ message: "Task not found" });
-  }
-
-  return res.status(200).json({ task });
+  return res.status(200).json({ task: req.task });
 };
 
 // Read list
@@ -98,7 +107,14 @@ const getTasks = async (req, res) => {
     sortOrder,
   } = req.query;
 
+  // Workspace isolation: members only see their resolved workspace; a
+  // platform admin without a workspace header sweeps across all workspaces.
+  const workspaceId = req.isPlatformAdmin && !req.workspace
+    ? undefined
+    : req.workspace.id;
+
   const filters = {
+    workspaceId,
     ...(statusId && { statusId }),
     ...(createdById && { createdById, createdByType }),
     ...(endFlag !== undefined && { endFlag: endFlag === "true" }),
@@ -138,7 +154,10 @@ const updateTask = async (req, res) => {
 
   // Validate category IDs when relations are being replaced
   if (categories !== undefined) {
-    const validCategoryIds = await taskRepository.findExistingCategoryIds(categories);
+    const validCategoryIds = await taskRepository.findExistingCategoryIds(
+      req.task.workspaceId,
+      categories
+    );
     const invalidCategories = categories.filter(
       (id) => !validCategoryIds.includes(id)
     );
@@ -151,7 +170,10 @@ const updateTask = async (req, res) => {
 
   // Validate assignment IDs when relations are being replaced
   if (assignments !== undefined) {
-    const validAssignables = await taskRepository.findExistingAssignables(assignments);
+    const validAssignables = await taskRepository.findExistingAssignables(
+      assignments,
+      req.task.workspaceId
+    );
     const invalidAssignments = assignments.filter(
       (a) => !validAssignables.includes(`${a.assignableType}:${a.assignableId}`)
     );
@@ -164,13 +186,17 @@ const updateTask = async (req, res) => {
     }
   }
 
-  // Subtask: parent must exist, be alive, be a root task, and not be the task itself
+  // Subtask: parent must exist, be alive, be a root task, be not the task itself,
+  // and live in the same workspace (isolation)
   if (parentTaskId !== undefined && parentTaskId !== null) {
     if (parentTaskId === req.params.id) {
       return res.status(400).json({ message: "A task cannot be its own parent" });
     }
 
-    const parent = await taskRepository.findExistingParentTask(parentTaskId);
+    const parent = await taskRepository.findExistingParentTask(
+      req.task.workspaceId,
+      parentTaskId
+    );
     if (!parent) {
       return res.status(400).json({
         message:

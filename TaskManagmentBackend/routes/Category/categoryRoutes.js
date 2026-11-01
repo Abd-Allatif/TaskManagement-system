@@ -1,6 +1,7 @@
 const express = require("express");
 const verifyToken = require("../../middleware/auth");
-const verifyAdmin = require("../../middleware/adminAuth");
+const { resolveWorkspace } = require("../../middleware/workspace");
+const { requirePermission } = require("../../middleware/permissions");
 const {
   createCategory,
   getCategories,
@@ -16,17 +17,35 @@ const {
 
 const router = express.Router();
 
-// Any authenticated principal can read categories and create new ones.
-router.use(verifyToken);
+// Every category operation is scoped to the X-Workspace-Id workspace.
+router.use(verifyToken, resolveWorkspace);
 
-// Every principal can create; edit/delete remain admin-only.
-router.post("/", createCategoryRules, validate, createCategory);
-
+// Both members and platform admins may read and create.
 router.get("/", getCategories);
 router.get("/:id", getCategoryById);
 
-router.put("/:id", verifyAdmin, updateCategoryRules, validate, updateCategory);
+router.post(
+  "/",
+  requirePermission("category.create"),
+  createCategoryRules,
+  validate,
+  createCategory
+);
 
-router.delete("/:id", verifyAdmin, deleteCategory);
+// Previously platform-admin-only; now permission-driven via the member role
+// (OWNER/ADMIN system roles include these codes).
+router.put(
+  "/:id",
+  requirePermission("category.update"),
+  updateCategoryRules,
+  validate,
+  updateCategory
+);
+
+router.delete(
+  "/:id",
+  requirePermission("category.delete"),
+  deleteCategory
+);
 
 module.exports = router;

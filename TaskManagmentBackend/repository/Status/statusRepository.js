@@ -1,10 +1,14 @@
 const prisma = require("../../prismaClient");
 
-const getStatuses = () => prisma.status.findMany({ orderBy: { label: "asc" } });
+const getStatuses = () =>
+  prisma.status.findMany({ where: { deletedAt: null }, orderBy: { label: "asc" } });
 
 const getStatusById = (id) => prisma.status.findUnique({ where: { id } });
 
-const getStatusByCode = (code) => prisma.status.findUnique({ where: { code } });
+// The code uniqueness is a (code, deleted_at) composite, so live lookups
+// are findFirst filtered to non-deleted rows.
+const getStatusByCode = (code) =>
+  prisma.status.findFirst({ where: { code, deletedAt: null } });
 
 const createStatus = (data) => prisma.status.create({ data });
 

@@ -1,20 +1,34 @@
 const prisma = require("../../prismaClient");
 
-const createCategory = (data) => prisma.category.create({ data });
+const createCategory = ({ workspaceId, name, color }) =>
+  prisma.category.create({
+    data: {
+      workspaceId,
+      name,
+      color: color || null,
+    },
+  });
 
-const getCategories = () => prisma.category.findMany({
-    orderBy: {createdAt: "desc"}
-});
+const getCategories = (workspaceId) =>
+  prisma.category.findMany({
+    where: { workspaceId, deletedAt: null },
+    orderBy: { createdAt: "desc" },
+  });
 
-const getCategoryById = (id) => prisma.category.findFirst({
-    where: {id}
-});
+const getCategoryById = (workspaceId, id) =>
+  prisma.category.findFirst({
+    where: { id, workspaceId, deletedAt: null },
+  });
 
-const updateCategory = (id, data) => prisma.category.update({
-    where: {id}, data
-});
+// The caller must have loaded the category through getCategoryById first, so
+// the mutation cannot cross workspaces.
+const updateCategory = (id, data) =>
+  prisma.category.update({
+    where: { id },
+    data,
+  });
 
-const deleteCategory = (id) => prisma.category.delete({where: {id}});
+const deleteCategory = (id) => prisma.category.delete({ where: { id } });
 
 module.exports = {
   createCategory,

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api.js";
 import { useAuth } from "../lib/auth.jsx";
+import { useWorkspace } from "../lib/workspace.jsx";
 import { useMutation, useResource } from "../lib/useResource.js";
 import {
   Alert,
@@ -58,6 +59,7 @@ export function TaskForm({
   presetParentId = "",
 }) {
   const { token, isAdmin, principal } = useAuth();
+  const { workspaceId } = useWorkspace();
   const toast = useToast();
 
   const isEdit = Boolean(task?.id);
@@ -74,8 +76,9 @@ export function TaskForm({
       api.listTasks(
         { limit: 100, sortBy: "createDate", sortOrder: "desc" },
         token,
+        workspaceId,
       ),
-    [token, open],
+    [token, workspaceId, open],
     { enabled: open },
   );
 
@@ -126,8 +129,8 @@ export function TaskForm({
 
   const save = useMutation(async (payload) =>
     isEdit
-      ? api.updateTask(task.id, payload, token)
-      : api.createTask(payload, token),
+      ? api.updateTask(task.id, payload, token, workspaceId)
+      : api.createTask(payload, token, workspaceId),
   );
 
   const set = (key) => (value) => setForm((prev) => ({ ...prev, [key]: value }));

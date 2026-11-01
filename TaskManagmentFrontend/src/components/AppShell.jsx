@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useRouter } from "../router/router.jsx";
 import { useAuth } from "../lib/auth.jsx";
+import { useWorkspace } from "../lib/workspace.jsx";
 import { Avatar, Button, RoleBadge } from "./ui.jsx";
 
 const WORK_NAV = [
@@ -8,6 +9,11 @@ const WORK_NAV = [
   { to: "/tasks", label: "Tasks", glyph: "☰" },
   { to: "/categories", label: "Categories", glyph: "◈" },
   { to: "/statuses", label: "Statuses", glyph: "⬡" },
+];
+
+const WORKSPACE_NAV = [
+  { to: "/workspace/members", label: "Members", glyph: "☁" },
+  { to: "/workspace/roles", label: "Roles", glyph: "※" },
 ];
 
 const ADMIN_NAV = [
@@ -39,6 +45,7 @@ function NavLink({ item, pathname, onNavigate }) {
 export function AppShell({ eyebrow, title, actions, children }) {
   const { pathname } = useRouter();
   const { principal, role, isAdmin, signOut } = useAuth();
+  const { workspaces, active, workspaceId, setActiveWorkspace } = useWorkspace();
   const [railOpen, setRailOpen] = useState(false);
 
   // Collapse the off-canvas rail whenever the route changes.
@@ -84,7 +91,19 @@ export function AppShell({ eyebrow, title, actions, children }) {
                 />
               ))}
             </div>
-          ) : null}
+          ) : (
+            <div className="rail__group">
+              <span className="rail__group-title">Workspace</span>
+              {WORKSPACE_NAV.map((item) => (
+                <NavLink
+                  key={item.to}
+                  item={item}
+                  pathname={pathname}
+                  onNavigate={() => setRailOpen(false)}
+                />
+              ))}
+            </div>
+          )}
         </nav>
 
         <div className="rail__foot">
@@ -128,6 +147,28 @@ export function AppShell({ eyebrow, title, actions, children }) {
             <span className="label topbar__eyebrow">{eyebrow || "Console"}</span>
             <h1>{title}</h1>
           </div>
+
+          {/* Workspace switcher: the active selection rides every request as
+              X-Workspace-Id. Admins may leave it unset to browse in sudo
+              mode; members always have exactly one workspace selected. */}
+          {workspaces.length > 0 ? (
+            <div>
+              <select
+                className="select"
+                style={{ minWidth: 190 }}
+                value={workspaceId || ""}
+                aria-label="Active workspace"
+                onChange={(event) => setActiveWorkspace(event.target.value)}
+              >
+                {workspaces.map((ws) => (
+                  <option key={ws.id} value={ws.id}>
+                    {ws.name}
+                    {ws.role ? ` — ${ws.role.name}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
 
           {actions ? <div className="topbar__actions">{actions}</div> : null}
         </header>

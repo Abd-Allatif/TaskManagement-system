@@ -7,12 +7,12 @@ jest.mock("../prismaClient", () => ({
     count: jest.fn(),
   },
   status: {
-    findUnique: jest.fn(),
+    findFirst: jest.fn(),
   },
   category: {
     findMany: jest.fn(),
   },
-  user: {
+  membership: {
     findMany: jest.fn(),
   },
   admin: {
@@ -50,6 +50,9 @@ const mockReq = (overrides = {}) => ({
   params: {},
   query: {},
   user: { userId: "user-1", email: "test@example.com", type: "USER", id: "user-1" },
+  // The route-resolved workspace context and the task loaded by the guards
+  workspace: { id: "ws-1" },
+  task: { id: "task-1", workspaceId: "ws-1" },
   ...overrides,
 });
 
@@ -79,7 +82,7 @@ describe("createTask", () => {
       createdById: "user-1",
     };
     prisma.task.create.mockResolvedValue(createdTask);
-    prisma.status.findUnique.mockResolvedValue({ id: "status-1", code: "PENDING" });
+    prisma.status.findFirst.mockResolvedValue({ id: "status-1", code: "PENDING" });
 
     const req = mockReq({ body: validBody });
     const res = mockRes();
@@ -95,7 +98,7 @@ describe("createTask", () => {
 
   it("sets createdBy from req.user", async () => {
     prisma.task.create.mockResolvedValue({ id: "task-1" });
-    prisma.status.findUnique.mockResolvedValue({ id: "status-1", code: "PENDING" });
+    prisma.status.findFirst.mockResolvedValue({ id: "status-1", code: "PENDING" });
 
     const req = mockReq({ body: validBody });
     const res = mockRes();
@@ -109,7 +112,7 @@ describe("createTask", () => {
 
   it("records an ADMIN creator when the token belongs to an admin", async () => {
     prisma.task.create.mockResolvedValue({ id: "task-1" });
-    prisma.status.findUnique.mockResolvedValue({ id: "status-1", code: "PENDING" });
+    prisma.status.findFirst.mockResolvedValue({ id: "status-1", code: "PENDING" });
 
     const req = mockReq({
       body: validBody,
@@ -126,14 +129,16 @@ describe("createTask", () => {
 
   it("defaults statusId to PENDING when not provided", async () => {
     prisma.task.create.mockResolvedValue({ id: "task-1" });
-    prisma.status.findUnique.mockResolvedValue({ id: "status-1", code: "PENDING" });
+    prisma.status.findFirst.mockResolvedValue({ id: "status-1", code: "PENDING" });
 
     const req = mockReq({ body: validBody });
     const res = mockRes();
 
     await createTask(req, res);
 
-    expect(prisma.status.findUnique).toHaveBeenCalledWith({ where: { code: "PENDING" } });
+    expect(prisma.status.findFirst).toHaveBeenCalledWith({
+      where: { code: "PENDING", deletedAt: null },
+    });
     const createData = prisma.task.create.mock.calls[0][0].data;
     expect(createData.statusId).toBe("status-1");
   });
@@ -147,13 +152,13 @@ describe("createTask", () => {
 
     await createTask(req, res);
 
-    expect(prisma.status.findUnique).not.toHaveBeenCalled();
+    expect(prisma.status.findFirst).not.toHaveBeenCalled();
     const createData = prisma.task.create.mock.calls[0][0].data;
     expect(createData.statusId).toBe("custom-status");
   });
 
   it("returns 500 when PENDING status is not seeded", async () => {
-    prisma.status.findUnique.mockResolvedValue(null);
+    prisma.status.findFirst.mockResolvedValue(null);
 
     const req = mockReq({ body: validBody });
     const res = mockRes();
@@ -168,7 +173,7 @@ describe("createTask", () => {
   });
 
   it("returns 400 listing invalid category IDs", async () => {
-    prisma.status.findUnique.mockResolvedValue({ id: "status-1", code: "PENDING" });
+    prisma.status.findFirst.mockResolvedValue({ id: "status-1", code: "PENDING" });
     prisma.category.findMany.mockResolvedValue([{ id: "cat-1" }]);
 
     const bodyWithCategories = { ...validBody, categories: ["cat-1", "bad-cat"] };
@@ -185,8 +190,8 @@ describe("createTask", () => {
   });
 
   it("returns 400 listing invalid assignment IDs", async () => {
-    prisma.status.findUnique.mockResolvedValue({ id: "status-1", code: "PENDING" });
-    prisma.user.findMany.mockResolvedValue([{ id: "user-99" }]);
+    prisma.status.findFirst.mockResolvedValue({ id: "status-1", code: "PENDING" });
+    prisma.membership.findMany.mockResolvedValue([{ userId: "user-99" }]);
     prisma.admin.findMany.mockResolvedValue([]);
 
     const bodyWithAssignments = {
@@ -211,7 +216,7 @@ describe("createTask", () => {
   it("passes deadline and parentTaskId into taskData", async () => {
     const deadline = new Date(Date.now() + 86400000);
     prisma.task.create.mockResolvedValue({ id: "task-1" });
-    prisma.status.findUnique.mockResolvedValue({ id: "status-1", code: "PENDING" });
+    prisma.status.findFirst.mockResolvedValue({ id: "status-1", code: "PENDING" });
 
     const bodyWithExtras = {
       ...validBody,
@@ -230,7 +235,7 @@ describe("createTask", () => {
 
   it("creates a subtask when the parent exists, is alive and is a root task", async () => {
     prisma.task.create.mockResolvedValue({ id: "task-1" });
-    prisma.status.findUnique.mockResolvedValue({ id: "status-1", code: "PENDING" });
+    prisma.status.findFirst.mockResolvedValue({ id: "status-1", code: "PENDING" });
     prisma.task.findFirst.mockResolvedValue({ id: "parent-1" });
 
     const req = mockReq({ body: { ...validBody, parentTaskId: "parent-1" } });
@@ -239,7 +244,12 @@ describe("createTask", () => {
     await createTask(req, res);
 
     expect(prisma.task.findFirst).toHaveBeenCalledWith({
-      where: { id: "parent-1", deletedAt: null, parentTaskId: null },
+      where: {
+        id: "parent-1",
+        deletedAt: null,
+        parentTaskId: null,
+        workspaceId: "ws-1",
+      },
       select: { id: true },
     });
     expect(res.status).toHaveBeenCalledWith(201);
@@ -248,7 +258,7 @@ describe("createTask", () => {
   });
 
   it("returns 400 when the subtask parent is missing, deleted or itself a subtask", async () => {
-    prisma.status.findUnique.mockResolvedValue({ id: "status-1", code: "PENDING" });
+    prisma.status.findFirst.mockResolvedValue({ id: "status-1", code: "PENDING" });
     prisma.task.findFirst.mockResolvedValue(null);
 
     const req = mockReq({ body: { ...validBody, parentTaskId: "ghost" } });
@@ -265,9 +275,9 @@ describe("createTask", () => {
   });
 
   it("rejects type/id mismatches in assignments (USER type pointing at an admin record)", async () => {
-    prisma.status.findUnique.mockResolvedValue({ id: "status-1", code: "PENDING" });
+    prisma.status.findFirst.mockResolvedValue({ id: "status-1", code: "PENDING" });
     // The ID only exists as an ADMIN; the USER table has nothing
-    prisma.user.findMany.mockResolvedValue([]);
+    prisma.membership.findMany.mockResolvedValue([]);
     prisma.admin.findMany.mockResolvedValue([]);
 
     const req = mockReq({
@@ -289,7 +299,7 @@ describe("createTask", () => {
 
   it("defaults categories and assignments to empty arrays", async () => {
     prisma.task.create.mockResolvedValue({ id: "task-1" });
-    prisma.status.findUnique.mockResolvedValue({ id: "status-1", code: "PENDING" });
+    prisma.status.findFirst.mockResolvedValue({ id: "status-1", code: "PENDING" });
 
     const req = mockReq({ body: { title: "No relations" } });
     const res = mockRes();
@@ -303,33 +313,16 @@ describe("createTask", () => {
 });
 
 describe("getTaskById", () => {
-  it("returns 200 with the task when found", async () => {
-    const task = { id: "task-1", title: "Test" };
-    prisma.task.findFirst.mockResolvedValue(task);
+  it("returns the task loaded and isolated by loadWorkspaceTask", async () => {
+    const task = { id: "task-1", title: "Test", workspaceId: "ws-1" };
 
-    const req = mockReq({ params: { id: "task-1" } });
+    const req = mockReq({ params: { id: "task-1" }, task });
     const res = mockRes();
 
     await getTaskById(req, res);
 
-    expect(prisma.task.findFirst).toHaveBeenCalledWith({
-      where: { id: "task-1", deletedAt: null },
-      include: expect.any(Object),
-    });
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({ task });
-  });
-
-  it("returns 404 when task is not found (or soft-deleted)", async () => {
-    prisma.task.findFirst.mockResolvedValue(null);
-
-    const req = mockReq({ params: { id: "missing" } });
-    const res = mockRes();
-
-    await getTaskById(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(404);
-    expect(res.json).toHaveBeenCalledWith({ message: "Task not found" });
   });
 });
 
@@ -345,7 +338,7 @@ describe("getTasks", () => {
 
     expect(prisma.task.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ deletedAt: null }),
+        where: expect.objectContaining({ deletedAt: null, workspaceId: "ws-1" }),
       })
     );
     expect(res.status).toHaveBeenCalledWith(200);
@@ -498,7 +491,7 @@ describe("updateTask", () => {
   });
 
   it("rejects invalid assignable IDs when assignments are provided", async () => {
-    prisma.user.findMany.mockResolvedValue([{ id: "user-99" }]);
+    prisma.membership.findMany.mockResolvedValue([{ userId: "user-99" }]);
     prisma.admin.findMany.mockResolvedValue([]);
 
     const req = mockReq({
@@ -580,7 +573,7 @@ describe("updateTask", () => {
     prisma.task.update.mockResolvedValue(updated);
     prisma.task.findFirst.mockResolvedValue(updated);
     prisma.category.findMany.mockResolvedValue([{ id: "cat-1" }]);
-    prisma.user.findMany.mockResolvedValue([{ id: "user-1" }]);
+    prisma.membership.findMany.mockResolvedValue([{ userId: "user-1" }]);
     prisma.admin.findMany.mockResolvedValue([]);
 
     const req = mockReq({
@@ -604,7 +597,7 @@ describe("updateTask", () => {
   });
 
   it("rejects a USER assignment whose ID exists only in the ADMIN table", async () => {
-    prisma.user.findMany.mockResolvedValue([]);
+    prisma.membership.findMany.mockResolvedValue([]);
     prisma.admin.findMany.mockResolvedValue([{ id: "admin-1" }]);
 
     const req = mockReq({

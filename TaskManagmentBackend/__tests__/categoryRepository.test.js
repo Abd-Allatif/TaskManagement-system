@@ -20,12 +20,13 @@ describe("createCategory", () => {
     prisma.category.create.mockResolvedValue({ id: "c1" });
 
     const result = await categoryRepository.createCategory({
+      workspaceId: "w1",
       name: "Work",
       color: "#fff",
     });
 
     expect(prisma.category.create).toHaveBeenCalledWith({
-      data: { name: "Work", color: "#fff" },
+      data: { workspaceId: "w1", name: "Work", color: "#fff" },
     });
     expect(result).toEqual({ id: "c1" });
   });
@@ -35,9 +36,10 @@ describe("getCategories", () => {
   it("lists categories newest first", async () => {
     prisma.category.findMany.mockResolvedValue([]);
 
-    await categoryRepository.getCategories();
+    await categoryRepository.getCategories("w1");
 
     expect(prisma.category.findMany).toHaveBeenCalledWith({
+      where: { workspaceId: "w1", deletedAt: null },
       orderBy: { createdAt: "desc" },
     });
   });
@@ -47,10 +49,10 @@ describe("getCategoryById", () => {
   it("finds by id", async () => {
     prisma.category.findFirst.mockResolvedValue({ id: "c1" });
 
-    const result = await categoryRepository.getCategoryById("c1");
+    const result = await categoryRepository.getCategoryById("w1", "c1");
 
     expect(prisma.category.findFirst).toHaveBeenCalledWith({
-      where: { id: "c1" },
+      where: { id: "c1", workspaceId: "w1", deletedAt: null },
     });
     expect(result).toEqual({ id: "c1" });
   });

@@ -1,6 +1,9 @@
 const prisma = require("../../prismaClient");
 
-const findByEmail = (email) => prisma.admin.findUnique({ where: { email } });
+// Email uniqueness is a (email, deleted_at) composite, so live lookups are
+// findFirst filtered to non-deleted rows.
+const findByEmail = (email) =>
+  prisma.admin.findFirst({ where: { email, deletedAt: null } });
 
 const findById = (id) => prisma.admin.findUnique({ where: { id } });
 
@@ -26,8 +29,8 @@ const getOverview = async () => {
 };
 
 const findByEmailWithTokens = (email) =>
-  prisma.admin.findUnique({
-    where: { email },
+  prisma.admin.findFirst({
+    where: { email, deletedAt: null },
     include: { adminVerificationTokens: true },
   });
 

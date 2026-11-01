@@ -4,6 +4,7 @@ jest.mock("../prismaClient", () => ({
   task: { count: jest.fn(), groupBy: jest.fn() },
   category: { count: jest.fn() },
   status: {
+    findFirst: jest.fn(),
     findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
@@ -102,7 +103,7 @@ describe("getOverview", () => {
 
 describe("createStatus", () => {
   it("returns 400 when the code already exists", async () => {
-    prisma.status.findUnique.mockResolvedValue({ id: "s1" });
+    prisma.status.findFirst.mockResolvedValue({ id: "s1" });
 
     const res = mockRes();
     await createStatus(
@@ -115,7 +116,7 @@ describe("createStatus", () => {
   });
 
   it("returns 201 and creates a new status", async () => {
-    prisma.status.findUnique.mockResolvedValue(null);
+    prisma.status.findFirst.mockResolvedValue(null);
     const created = { id: "s9", code: "REVIEW", label: "Review" };
     prisma.status.create.mockResolvedValue(created);
 

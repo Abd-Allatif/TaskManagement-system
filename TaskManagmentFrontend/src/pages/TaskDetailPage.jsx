@@ -16,6 +16,7 @@ import {
 } from "../components/ui.jsx";
 import { api } from "../lib/api.js";
 import { useAuth } from "../lib/auth.jsx";
+import { useWorkspace } from "../lib/workspace.jsx";
 import { useMutation, useResource } from "../lib/useResource.js";
 import { usePrincipals, useReference } from "../lib/useReference.js";
 import {
@@ -39,21 +40,32 @@ export function TaskDetailPage({ id }) {
   const [subDrawerOpen, setSubDrawerOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const taskQuery = useResource((signal) => api.getTask(id, token), [token, id], {
+  const { workspaceId } = useWorkspace();
+  const taskQuery = useResource(
+    (signal) => api.getTask(id, token, workspaceId),
+    [token, id, workspaceId],
+    {
     onError: reportAuthError,
   });
 
   const task = taskQuery.data?.task;
   const nextQuery = useResource(
-    (signal) => api.listTasks({ limit: 20, sortBy: "createDate", sortOrder: "desc" }, token),
+    (signal) =>
+      api.listTasks(
+        { limit: 20, sortBy: "createDate", sortOrder: "desc" },
+        token,
+        workspaceId,
+      ),
     [token],
     { onError: reportAuthError },
   );
 
   const canEdit = Boolean(task) && (isAdmin || task.createdById === principal?.id);
 
-  const update = useMutation(async (patch) => api.updateTask(id, patch, token));
-  const remove = useMutation(async () => api.deleteTask(id, token));
+  const update = useMutation(async (patch) =>
+    api.updateTask(id, patch, token, workspaceId),
+  );
+  const remove = useMutation(async () => api.deleteTask(id, token, workspaceId));
 
   const applyPatch = async (patch, message) => {
     try {
